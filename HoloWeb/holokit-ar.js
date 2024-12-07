@@ -4,7 +4,7 @@ console.log = function(message) {
     window.webkit.messageHandlers.logHandler.postMessage(String(message));
 }
 
-console.log("holokit-ar.js loaded")
+//console.log("holokit-ar.js loaded")
 
 if (typeof WebXRPolyfill !== 'undefined' && !navigator.xr) {
     const polyfill = new WebXRPolyfill();
@@ -13,7 +13,7 @@ if (typeof WebXRPolyfill !== 'undefined' && !navigator.xr) {
 if (navigator.xr) {
     navigator.xr.isSessionSupported("immersive-ar").then((supported) => {
         if (supported) {
-            console.log("immersive-ar mode is supported")
+//            console.log("immersive-ar mode is supported")
         } else {
             console.log("immersive-ar mode is not supported")
         }

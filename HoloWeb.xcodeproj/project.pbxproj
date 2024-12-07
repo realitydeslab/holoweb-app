@@ -3,23 +3,19 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 56;
+	objectVersion = 70;
 	objects = {
 
 /* Begin PBXBuildFile section */
 		4B1E355E2A7A21A9003EBC46 /* HoloWebApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B1E355D2A7A21A9003EBC46 /* HoloWebApp.swift */; };
-		4B1E35602A7A21A9003EBC46 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B1E355F2A7A21A9003EBC46 /* ContentView.swift */; };
 		4B1E35622A7A21AB003EBC46 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4B1E35612A7A21AB003EBC46 /* Assets.xcassets */; };
 		4B1E35652A7A21AB003EBC46 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4B1E35642A7A21AB003EBC46 /* Preview Assets.xcassets */; };
-		4B4BE6422A81E6D100D41300 /* WebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B4BE6412A81E6D100D41300 /* WebView.swift */; };
 		4B4BE6442A81E83900D41300 /* webxr-polyfill.js in Resources */ = {isa = PBXBuildFile; fileRef = 4B4BE6432A81E83900D41300 /* webxr-polyfill.js */; };
 		4B7E1F5E2A838F38002A4EA8 /* webxr2.0.js in Resources */ = {isa = PBXBuildFile; fileRef = 4B7E1F5D2A838F38002A4EA8 /* webxr2.0.js */; };
 		4B8A782D2A7A410400EB4501 /* ARManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B8A782C2A7A410400EB4501 /* ARManager.swift */; };
 		4BB199F42A83334400497037 /* jstest.js in Resources */ = {isa = PBXBuildFile; fileRef = 4BB199F32A83334400497037 /* jstest.js */; };
 		4BB199F72A83368000497037 /* holokit-ar.js in Resources */ = {isa = PBXBuildFile; fileRef = 4BB199F62A83368000497037 /* holokit-ar.js */; };
 		9602D0902CE974A200F2820D /* HoloWebClipApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9602D08A2CE974A200F2820D /* HoloWebClipApp.swift */; };
-		9602D0912CE97F2800F2820D /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B1E355F2A7A21A9003EBC46 /* ContentView.swift */; };
-		9602D0922CE97F2800F2820D /* WebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B4BE6412A81E6D100D41300 /* WebView.swift */; };
 		9602D0932CE97F2800F2820D /* ARManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B8A782C2A7A410400EB4501 /* ARManager.swift */; };
 		9602D0982CE97F3900F2820D /* webxr-polyfill.js in Resources */ = {isa = PBXBuildFile; fileRef = 4B4BE6432A81E83900D41300 /* webxr-polyfill.js */; };
 		9602D0992CE97F3900F2820D /* webxr2.0.js in Resources */ = {isa = PBXBuildFile; fileRef = 4B7E1F5D2A838F38002A4EA8 /* webxr2.0.js */; };
@@ -57,10 +53,8 @@
 /* Begin PBXFileReference section */
 		4B1E355A2A7A21A9003EBC46 /* HoloWeb.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HoloWeb.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4B1E355D2A7A21A9003EBC46 /* HoloWebApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoloWebApp.swift; sourceTree = "<group>"; };
-		4B1E355F2A7A21A9003EBC46 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		4B1E35612A7A21AB003EBC46 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		4B1E35642A7A21AB003EBC46 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
-		4B4BE6412A81E6D100D41300 /* WebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebView.swift; sourceTree = "<group>"; };
 		4B4BE6432A81E83900D41300 /* webxr-polyfill.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "webxr-polyfill.js"; sourceTree = "<group>"; };
 		4B7E1F5D2A838F38002A4EA8 /* webxr2.0.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = webxr2.0.js; sourceTree = "<group>"; };
 		4B8A782C2A7A410400EB4501 /* ARManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARManager.swift; sourceTree = "<group>"; };
@@ -71,6 +65,11 @@
 		9602D08B2CE974A200F2820D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		96A5654C2CE972690028AD43 /* HoloWebClip.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HoloWebClip.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		A75C1C2D2D01258A002EEC07 /* Models */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Models; sourceTree = "<group>"; };
+		A75C1C442D0269CC002EEC07 /* UI */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = UI; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		4B1E35572A7A21A9003EBC46 /* Frameworks */ = {
@@ -110,9 +109,9 @@
 		4B1E355C2A7A21A9003EBC46 /* HoloWeb */ = {
 			isa = PBXGroup;
 			children = (
+				A75C1C442D0269CC002EEC07 /* UI */,
+				A75C1C2D2D01258A002EEC07 /* Models */,
 				4B1E355D2A7A21A9003EBC46 /* HoloWebApp.swift */,
-				4B1E355F2A7A21A9003EBC46 /* ContentView.swift */,
-				4B4BE6412A81E6D100D41300 /* WebView.swift */,
 				4B8A782C2A7A410400EB4501 /* ARManager.swift */,
 				9602D08A2CE974A200F2820D /* HoloWebClipApp.swift */,
 				9602D0892CE974A200F2820D /* HoloWebClip.entitlements */,
@@ -152,6 +151,10 @@
 			dependencies = (
 				96A565702CE9726B0028AD43 /* PBXTargetDependency */,
 			);
+			fileSystemSynchronizedGroups = (
+				A75C1C2D2D01258A002EEC07 /* Models */,
+				A75C1C442D0269CC002EEC07 /* UI */,
+			);
 			name = HoloWeb;
 			productName = HoloKitWebXR;
 			productReference = 4B1E355A2A7A21A9003EBC46 /* HoloWeb.app */;
@@ -168,6 +171,10 @@
 			buildRules = (
 			);
 			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A75C1C2D2D01258A002EEC07 /* Models */,
+				A75C1C442D0269CC002EEC07 /* UI */,
 			);
 			name = HoloWebClip;
 			packageProductDependencies = (
@@ -247,8 +254,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				4B1E35602A7A21A9003EBC46 /* ContentView.swift in Sources */,
-				4B4BE6422A81E6D100D41300 /* WebView.swift in Sources */,
 				4B8A782D2A7A410400EB4501 /* ARManager.swift in Sources */,
 				4B1E355E2A7A21A9003EBC46 /* HoloWebApp.swift in Sources */,
 			);
@@ -258,8 +263,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				9602D0912CE97F2800F2820D /* ContentView.swift in Sources */,
-				9602D0922CE97F2800F2820D /* WebView.swift in Sources */,
 				9602D0932CE97F2800F2820D /* ARManager.swift in Sources */,
 				9602D0902CE974A200F2820D /* HoloWebClipApp.swift in Sources */,
 			);
