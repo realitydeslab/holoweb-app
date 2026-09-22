@@ -585,3 +585,10 @@ Changes:
   - examples/image-tracking.html is not bundled yet (6);
   - iw-hands and iw-webgpu-hands now enter VR, where the polyfill does not grant hand-tracking (4).
 - engine.needle.tools/samples/image-tracking/ embeds its app in a cross-origin iframe (image-tracking-zubckszr0qj2.needle.run), which the bridge refuses, so regression tests the app URL directly.
+
+## Polyfill execution log (capabilities field names, device gaps from native)
+
+- Device gap 1: hand-tracking was missing from requestSession features in the hands samples. Cause: `parseCapabilities` read `sceneDepth`, but the protocol and native send `{ lidar, sceneReconstruction, handTracking }`, so hand-tracking was never offered on the device, in AR or VR. The mock sent the old name, which hid the gap in e2e.
+- Fix: `handTracking` (or the older `sceneDepth`) gates hand-tracking. The mock and the meshes test's fake native now send the protocol's names. New unit test for the native format.
+- Device gaps 2 (PlayCanvas and Needle don't request image-tracking) and 3 (XRRay): the device bundle was synced at 20:10, before image tracking and the WebXR-globals fix. Both pages request image-tracking headless once the feature exists (PlayCanvas checks `window.XRImageTrackingResult`). Needs a re-sync.
+- Verification: npm test 107/107, e2e 33/33.

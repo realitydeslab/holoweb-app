@@ -2,6 +2,7 @@
 // G9 mesh-detection over bridge.onMeshes, G13 capabilities from the ready reply.
 import { mat4 } from 'gl-matrix';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { parseCapabilities } from '../src/bridge-types.js';
 import { featuresFor } from '../src/device.js';
 import type { HoloWebGlobal } from '../src/index.js';
 import { mockMeshes } from '../src/mock-environment.js';
@@ -29,7 +30,7 @@ beforeAll(async () => {
         postMessage: (m: Msg) =>
           Promise.resolve(
             m.type === 'ready'
-              ? { ok: true, capabilities: { sceneReconstruction: true, sceneDepth: true } }
+              ? { ok: true, capabilities: { lidar: true, sceneReconstruction: true, handTracking: true } }
               : m.type === 'requestSession' ? { ok: true, mode: 'mono' } : { ok: true },
           ),
       },
@@ -47,6 +48,13 @@ describe('capabilities (G13)', () => {
     const lidar = featuresFor({ sceneReconstruction: true, sceneDepth: true });
     expect(lidar).toContain('mesh-detection');
     expect(lidar).toContain('hand-tracking');
+  });
+
+  it("reads native's { lidar, sceneReconstruction, handTracking } (and the older sceneDepth)", () => {
+    const iphonePro = parseCapabilities({ lidar: true, sceneReconstruction: true, handTracking: true })!;
+    expect(featuresFor(iphonePro)).toEqual(expect.arrayContaining(['hand-tracking', 'mesh-detection']));
+    expect(featuresFor(parseCapabilities({ sceneReconstruction: true, sceneDepth: true })!)).toContain('hand-tracking');
+    expect(featuresFor(parseCapabilities({ lidar: false, sceneReconstruction: false, handTracking: false })!)).not.toContain('hand-tracking');
   });
 
   it('grants a required mesh-detection once ready reports LiDAR', async () => {

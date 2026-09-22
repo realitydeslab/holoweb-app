@@ -105,7 +105,7 @@ export function createMockTransport(options: MockOptions = {}): Transport {
       },
       mode,
       // like an iPhone Pro: LiDAR scene reconstruction and depth
-      capabilities: { sceneReconstruction: true, sceneDepth: true },
+      capabilities: { lidar: true, sceneReconstruction: true, handTracking: true },
     }),
     requestSession: (msg) => {
       stop();

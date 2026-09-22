@@ -95,8 +95,8 @@ extension ARBridge {
         // `sceneDepth` is what the polyfill reads (it gates hand-tracking); `lidar` kept for older pages.
         ["sceneDepth": ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth),
          "lidar": ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth),
-         "sceneDepth": ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth),
          "sceneReconstruction": ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh),
-         "handTracking": true]
+         // Native hand tracking lifts Vision joints with LiDAR depth, so it needs sceneDepth.
+         "handTracking": ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth)]
     }
 }

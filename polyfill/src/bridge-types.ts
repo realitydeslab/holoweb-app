@@ -118,5 +118,9 @@ export interface Capabilities {
 
 export function parseCapabilities(v: unknown): Capabilities | undefined {
   if (!isRecord(v)) return undefined;
-  return { sceneReconstruction: v.sceneReconstruction === true, sceneDepth: v.sceneDepth === true };
+  // protocol: { lidar, sceneReconstruction, handTracking }; `sceneDepth` is the older name
+  return {
+    sceneReconstruction: v.sceneReconstruction === true,
+    sceneDepth: v.handTracking === true || v.sceneDepth === true,
+  };
 }
