@@ -47,5 +47,5 @@ export function mockHand(cameraPose: mat4, ms: number): NativeHandData {
     const w = vec3.transformMat4(vec3.create(), p, cameraPose);
     joints.push(w[0], w[1], w[2]);
   }
-  return { handedness: 'right', joints, confidence: new Array(21).fill(0.9) };
+  return { handedness: 'right', joints, confidence: new Array(21).fill(0.9), depthValid: (1 << 21) - 1 };
 }

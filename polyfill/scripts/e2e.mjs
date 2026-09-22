@@ -12,6 +12,7 @@ import { runHandChecks } from './e2e-hands.mjs';
 import { runSampleChecks } from './e2e-samples.mjs';
 import { runThreeOfficialChecks } from './e2e-three-official.mjs';
 import { runStaleEyeChecks as staleEyeChecks } from './e2e-stale-eye.mjs';
+import { mimicWKWebView, runGlobalsChecks } from './e2e-wkwebview.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const shotDir = process.env.HOLOWEB_E2E_SHOTS ?? join(root, 'test-results');
@@ -22,8 +23,9 @@ const server = createServer(async (req, res) => {
   try {
     const path = join(root, decodeURIComponent(new URL(req.url, 'http://x').pathname));
     if (!path.startsWith(root)) throw new Error('outside root');
+    const body = await readFile(path);
     res.writeHead(200, { 'content-type': TYPES[extname(path)] ?? 'application/octet-stream' });
-    res.end(await readFile(path));
+    res.end(body);
   } catch {
     res.writeHead(404).end();
   }
@@ -36,6 +38,7 @@ const browser = await chromium.launch({
   channel: 'chromium',
   args: ['--enable-unsafe-webgpu', '--enable-gpu', '--use-angle=metal', '--ignore-gpu-blocklist'],
 });
+mimicWKWebView(browser); // no Chromium WebXR: the polyfill must supply every global
 
 const cases = process.env.HOLOWEB_E2E_ONLY === 'samples' ? [] : [
   { page: 'three-ar.html', mode: 'mono', backend: 'webgl', views: 1 },
@@ -228,7 +231,7 @@ for (const c of cases) {
   await context.close();
 }
 
-const suites = [staleEyeChecks, runHandChecks, runThreeOfficialChecks, runFrameChecks, runSampleChecks];
+const suites = [runGlobalsChecks, staleEyeChecks, runHandChecks, runThreeOfficialChecks, runFrameChecks, runSampleChecks];
 for (const check of process.env.HOLOWEB_E2E_ONLY === 'samples' ? [runSampleChecks] : suites) {
   const r = await check({ browser, base, root, shotDir });
   failures += r.failures;

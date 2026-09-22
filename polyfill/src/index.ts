@@ -9,6 +9,7 @@ import { HoloWebBridge, type NativeCallbacks } from './bridge.js';
 import { createHoloKitDevice, featuresFor } from './device.js';
 import { HandTracking } from './hand-input.js';
 import { installGPUBinding, needsPrimingView } from './gpu-binding.js';
+import { installWebXRGlobals, missingWebXRGlobals } from './globals.js';
 import { PlaneEnvironment } from './hittest.js';
 import { installTransientHitTest } from './hittest-transient.js';
 import { ScreenInput } from './input.js';
@@ -38,6 +39,8 @@ export interface HoloWebGlobal extends NativeCallbacks {
   readonly planes: PlaneTracking;
   readonly meshes: MeshTracking;
   readonly reflections: ReflectionMaps;
+  /** WebXR interface globals not installed (should be empty; XRGPUBinding needs WebGPU). */
+  missingGlobals(): string[];
 }
 
 function selectTransport(): Transport {
@@ -87,6 +90,7 @@ export function install(): HoloWebGlobal {
   installReflectionBinding(reflections);
   installTransientHitTest(environment);
   installGPUBinding();
+  installWebXRGlobals();
   installViewCountPolicy(needsPrimingView);
   installOpaqueFramebuffer();
 
@@ -103,6 +107,7 @@ export function install(): HoloWebGlobal {
     planes,
     meshes,
     reflections,
+    missingGlobals: () => missingWebXRGlobals(),
   };
   Object.defineProperty(globalThis, '__holoweb', { value: api, configurable: true, writable: false });
 

@@ -1,7 +1,7 @@
 /** Native <-> JS bridge protocol types (plan/bridge_protocol.md) and small parsing helpers. */
 import type { NativeAnchorData } from './anchors.js';
 import { devicePixelRatioOrOne } from './device.js';
-import type { NativeHandData } from './hand-input.js';
+import type { NativeHandsUpdate } from './hand-input.js';
 import type { NativeMeshUpdate } from './meshes.js';
 import type { NativePlaneData } from './hittest.js';
 import type { NativeEnvironment } from './reflection.js';
@@ -68,7 +68,7 @@ export interface NativeCallbacks {
   onTracking(tracking: TrackingState): void;
   onPlanes(planes: NativePlaneData[]): void;
   onAnchors(anchors: NativeAnchorData[]): void;
-  onHands(hands: NativeHandData[]): void;
+  onHands(update: NativeHandsUpdate): void;
   onEnvironment(environment: NativeEnvironment): void;
   onVisibility(state: 'visible' | 'visible-blurred' | 'hidden'): void;
   onMeshes(update: NativeMeshUpdate): void;

@@ -163,6 +163,7 @@ const SAMPLES = {
     },
   },
   'webgpu/immersive-ar-session': {
+    gpuWarnings: true, // G12: depth attachment size must match the colour layer (no validation warnings)
     async run(page, problems) {
       const layers = await page.evaluate(() => (window.__holoweb.bridge.device.activeSession.renderState.layers ?? []).length);
       if (layers !== 1) problems.push(`renderState.layers length ${layers}`);
@@ -200,6 +201,9 @@ async function runSample({ browser, root, shotDir }, name, spec) {
   const allowed = (text) => (spec.allow ?? []).some((re) => re.test(text));
   page.on('pageerror', (e) => !allowed(e.message) && problems.push(`pageerror: ${e.message.slice(0, 160)}`));
   page.on('console', (m) => m.type() === 'error' && !allowed(m.text()) && /XR|Session|HoloWeb/i.test(m.text()) && problems.push(`console.error: ${m.text().slice(0, 160)}`));
+  if (spec.gpuWarnings) {
+    page.on('console', (m) => m.type() === 'warning' && /WebGPU|GPU|validation|attachment/i.test(m.text()) && problems.push(`gpu warning: ${m.text().slice(0, 160)}`));
+  }
   await page.addInitScript({ path: join(root, 'dist/holoweb-polyfill.js') });
   try {
     try {

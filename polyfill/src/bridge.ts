@@ -28,7 +28,7 @@ import {
   type TrackingState,
 } from './bridge-types.js';
 import { nativeFramebufferSize, devicePixelRatioOrOne } from './device.js';
-import type { NativeHandData } from './hand-input.js';
+import type { NativeHandsUpdate } from './hand-input.js';
 import type { NativeMeshUpdate } from './meshes.js';
 import type { NativePlaneData, PlaneEnvironment } from './hittest.js';
 import { PosePredictor } from './prediction.js';
@@ -54,7 +54,7 @@ export class HoloWebBridge {
   /** Receives onAnchors updates (NativeAnchors). */
   anchorsHandler: ((anchors: NativeAnchorData[]) => void) | null = null;
   /** Receives onHands updates (HandTracking). */
-  handsHandler: ((hands: NativeHandData[]) => void) | null = null;
+  handsHandler: ((update: NativeHandsUpdate) => void) | null = null;
   /** Receives onEnvironment reflection maps (ReflectionMaps). */
   environmentHandler: ((environment: NativeEnvironment) => void) | null = null;
   /** Receives onVisibility states (visibility.ts). */
@@ -93,7 +93,7 @@ export class HoloWebBridge {
         this.planeListeners.forEach((l) => l(list));
       },
       onAnchors: (anchors) => this.anchorsHandler?.(Array.isArray(anchors) ? anchors : []),
-      onHands: (hands) => this.handsHandler?.(Array.isArray(hands) ? hands : []),
+      onHands: (update) => this.handsHandler?.(update),
       onEnvironment: (environment) => this.environmentHandler?.(environment),
       onVisibility: (state) => this.visibilityHandler?.(state),
       onMeshes: (update) => this.meshesHandler?.(update),

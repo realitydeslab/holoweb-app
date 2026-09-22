@@ -76,7 +76,7 @@ export function createMockTransport(options: MockOptions = {}): Transport {
       Date.now(),
     );
     // Vision runs at ~30 Hz on device
-    if (handsOn && frameIndex % 2 === 0) cb.onHands([mockHand(pose, performance.now() - start)]);
+    if (handsOn && frameIndex % 2 === 0) cb.onHands({ t: performance.now(), hands: [mockHand(pose, performance.now() - start)] });
   };
 
   const stop = () => {

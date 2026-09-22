@@ -39,12 +39,14 @@ export interface JointSource {
 }
 
 function fingerJoints(finger: (typeof FINGERS)[number], mcp: number): JointSource[] {
+  // spec radius table (samples_requirements.md G10); the pinky is ~15 % thinner
+  const k = finger === 'pinky-finger' ? 0.85 : 1;
   return [
-    { name: `${finger}-metacarpal`, from: [0, mcp, METACARPAL_T], next: mcp, radius: 0.01 },
-    { name: `${finger}-phalanx-proximal`, from: mcp, next: mcp + 1, radius: 0.01 },
-    { name: `${finger}-phalanx-intermediate`, from: mcp + 1, next: mcp + 2, radius: 0.009 },
-    { name: `${finger}-phalanx-distal`, from: mcp + 2, next: mcp + 3, radius: 0.008 },
-    { name: `${finger}-tip`, from: mcp + 3, next: -1, radius: 0.007 },
+    { name: `${finger}-metacarpal`, from: [0, mcp, METACARPAL_T], next: mcp, radius: 0.011 * k },
+    { name: `${finger}-phalanx-proximal`, from: mcp, next: mcp + 1, radius: 0.01 * k },
+    { name: `${finger}-phalanx-intermediate`, from: mcp + 1, next: mcp + 2, radius: 0.009 * k },
+    { name: `${finger}-phalanx-distal`, from: mcp + 2, next: mcp + 3, radius: 0.008 * k },
+    { name: `${finger}-tip`, from: mcp + 3, next: -1, radius: 0.007 * k },
   ];
 }
 
@@ -109,10 +111,44 @@ export function isCompleteHand(points: ArrayLike<number> | null | undefined): po
   return true;
 }
 
-/** Thumb-tip to index-tip distance with hysteresis. */
+/** Wrist to middle knuckle over a typical adult 0.095 m: scales gesture thresholds to the hand. */
+export function handScale(points: ArrayLike<number>): number {
+  const d = vec3.distance(point(points, 0, vec3.create()), point(points, 9, vec3.create()));
+  return d > 0 ? d / 0.095 : 1;
+}
+
+/** Thumb-tip to index-tip distance with hysteresis, thresholds scaled by hand size. */
 export function pinchState(points: ArrayLike<number>, wasPinching: boolean): boolean {
   const d = vec3.distance(point(points, 4, vec3.create()), point(points, 8, vec3.create()));
-  return wasPinching ? d < PINCH_OFF : d < PINCH_ON;
+  const s = handScale(points);
+  return wasPinching ? d < PINCH_OFF * s : d < PINCH_ON * s;
+}
+
+/** Squeeze (grab) closes when the curl ratio drops below SQUEEZE_ON and opens above SQUEEZE_OFF. */
+export const SQUEEZE_ON = 1.35;
+export const SQUEEZE_OFF = 1.55;
+
+/** Mean over index..pinky of |tip - wrist| / |MCP - wrist|: ~2 for an open hand, ~1.1 for a fist. */
+export function curlRatio(points: ArrayLike<number>): number {
+  const wrist = point(points, 0, vec3.create());
+  let sum = 0;
+  for (const mcp of [5, 9, 13, 17]) {
+    const knuckle = vec3.distance(point(points, mcp, vec3.create()), wrist);
+    sum += knuckle > 0 ? vec3.distance(point(points, mcp + 3, vec3.create()), wrist) / knuckle : 2;
+  }
+  return sum / 4;
+}
+
+export function squeezeState(points: ArrayLike<number>, wasSqueezing: boolean): boolean {
+  const c = curlRatio(points);
+  return wasSqueezing ? c < SQUEEZE_OFF : c < SQUEEZE_ON;
+}
+
+/** Palm centre: mean of the wrist and the four finger knuckles. */
+export function palmCenter(points: ArrayLike<number>): vec3 {
+  const out = vec3.create();
+  for (const i of [0, 5, 9, 13, 17]) vec3.add(out, out, point(points, i, vec3.create()));
+  return vec3.scale(out, out, 1 / 5);
 }
 
 /** Midpoint of thumb tip and index tip (target-ray origin). */
