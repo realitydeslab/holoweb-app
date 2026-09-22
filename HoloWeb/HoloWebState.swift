@@ -145,6 +145,7 @@ final class HoloWebState: NSObject {
     }
 
     func load(_ url: URL) {
+        print("[state] load \(url.absoluteString)")
         self.url = url
         webView.load(URLRequest(url: url))
     }
@@ -156,6 +157,14 @@ final class HoloWebState: NSObject {
         guard let web = Bundle.main.resourceURL?.appending(path: "Web"),
               FileManager.default.fileExists(atPath: web.appending(path: file).path) else { return nil }
         return BundledPageSchemeHandler.url(forBundledPath: path)
+    }
+
+    /// Gallery home page (holoweb.app).
+    static let homeURL = URL(string: "https://holoweb.app/")!
+
+    func goHome() {
+        if isInXRSession { exitXR() }
+        load(Self.homeURL)
     }
 
     func reload() {

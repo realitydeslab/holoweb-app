@@ -199,6 +199,13 @@ extension ARBridge: WKNavigationDelegate {
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                  preferences: WKWebpagePreferences) async -> (WKNavigationActionPolicy, WKWebpagePreferences) {
         preferences.allowsJSHandleCreationInPageWorld = true
+        // Inside the app, gallery links (holoweb.app/launch?url=… or /c?url=…) open the
+        // experience directly instead of showing the App Clip landing page.
+        if navigationAction.targetFrame?.isMainFrame ?? true,
+           let url = navigationAction.request.url, let target = HoloWebLink.inAppTarget(from: url) {
+            state?.load(target)
+            return (.cancel, preferences)
+        }
         return (.allow, preferences)
     }
 

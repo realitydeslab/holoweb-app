@@ -52,6 +52,11 @@ struct ContentView: View {
                     }
                 }
                 Button {
+                    state.goHome()
+                } label: {
+                    Label("Gallery", systemImage: "square.grid.2x2")
+                }
+                Button {
                     state.reload()
                 } label: {
                     Label("Reload", systemImage: "arrow.clockwise")

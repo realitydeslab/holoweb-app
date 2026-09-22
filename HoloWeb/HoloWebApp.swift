@@ -7,7 +7,8 @@ import SwiftUI
 struct HoloWebApp: App {
     @State private var state = HoloWebState()
 
-    private static let defaultURL = URL(string: "https://holoweb.app/test2/")!
+    /// Home page: the holoweb.app gallery of WebXR experiences.
+    static let defaultURL = URL(string: "https://holoweb.app/")!
 
     /// `HOLOWEB_PAGE` selects a bundled page under `Web/`; `HOLOWEB_URL` any URL.
     private static func launchURL() -> URL {
