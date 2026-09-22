@@ -35,6 +35,22 @@ final class ImageTracker {
 
     func clear() { trackable.removeAll() }
 
+    /// Size, byte count and luminance spread of a received image, so a blank or wrong snapshot
+    /// from the page is distinguishable from a genuinely featureless image in the logs.
+    static func describe(_ image: CGImage, png: Data) -> String {
+        let w = 64, h = 64
+        var pixels = [UInt8](repeating: 0, count: w * h)
+        guard let ctx = CGContext(data: &pixels, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w,
+                                  space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue) else {
+            return "\(image.width)x\(image.height) png=\(png.count)B"
+        }
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        let mean = pixels.reduce(0.0) { $0 + Double($1) } / Double(pixels.count)
+        let variance = pixels.reduce(0.0) { $0 + pow(Double($1) - mean, 2) } / Double(pixels.count)
+        return String(format: "%dx%d png=%dB mean=%.0f std=%.0f alpha=%d", image.width, image.height, png.count,
+                      mean, variance.squareRoot(), image.alphaInfo.rawValue)
+    }
+
     /// Builds and validates reference images; returns one score per requested image, in order.
     func setImages(_ images: [[String: Any]]) async -> [String] {
         var scores: [String] = []
@@ -54,7 +70,12 @@ final class ImageTracker {
             do {
                 try await reference.validate()
             } catch {
-                print("[bridge] image \(index) untrackable: \(error.localizedDescription)")
+                print("[bridge] image \(index) untrackable: \(error.localizedDescription) \(Self.describe(cgImage, png: png))")
+                #if DEBUG
+                if ProcessInfo.processInfo.environment["HOLOWEB_DUMP_IMAGES"] != nil {
+                    print("[bridge] image-dump \(index) \(png.base64EncodedString())")
+                }
+                #endif
                 score = "untrackable"
             }
             if score == "trackable", accepted.count >= Self.maxTracked { score = "untrackable" }
