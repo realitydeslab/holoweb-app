@@ -640,3 +640,12 @@ Changes:
   - The only WebKit-only failure was interrupted-ar's intentional `new Exception()`, which WebKit words "Can't find variable: Exception"; the allow-list now accepts both wordings.
 - Verification: npm test 111/111 (17 files); e2e Chromium + WebKit images 39/39; e2e WebKit full 36/36 (interrupted-ar rerun after the allow-list fix).
 - On the device, if it still fails: read `__holoweb.images.stats.snapshotErrors` or the warn line in native's log.
+
+### Gallery + bundled three.js on device (2026-09-22, iPhone 15 Pro)
+- threejs-bundled (offline r186 copies): hittest, plane_detection (planes n=1, 4-vertex polygon), lighting — all enter AR, 0–4 skipped of ~1560, no page errors.
+- Needle (physics playground, snow globe, musical instrument, collaborative sandbox, diamond ring): all 5 enter AR via WebXR (not Quick Look) under HoloWeb.
+- three.js ball shooter: enters AR (1554 frames, 6 skipped); logs "THREE.Object3D.add: object not an instance of THREE.Object3D" x2 → polyfill investigating input-source shape.
+- model-viewer: enters AR, then TypeError "Invalid direction value to construct XRRay" → polyfill XRRay stricter than Chrome; fixing.
+- SuperSplat: AR button clicked, no session requested, no error → polyfill investigating.
+- Babylon playground: the playground itself timed out preparing the runnable (before any AR button) → retry in final baseline.
+- Run: `Scripts/run-targets.py threejs-bundled gallery` → 44/52.
