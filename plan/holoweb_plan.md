@@ -176,3 +176,26 @@ Throughput is solved (59.9 onFrame/s, 0 skipped, 2 calls in flight). Each callAs
 - M3b (P0): timestamp-matched camera background. Renderer keeps a 3-deep ring of captured-image textures keyed by ARFrame.timestamp; the polyfill reports the timestamp it rendered each XR frame (fire-and-forget `postMessage({type:"rendered", t})`); Renderer draws the matching image. Removes virtual/real drift in mono.
 - M5 (P1, moved from M8): pose prediction in stereo. Extrapolate to predicted display time from the last poses; full app adds CoreMotion gyro (unavailable in App Clip).
 - Measure first: one-way delivery latency, and whether WKWebView rAF runs at 60 or 120 Hz on ProMotion devices.
+
+## 9. Feature specs and test targets (added 2026-09-22)
+
+Every feature below is implemented against a published spec or explainer and must pass on iPhone 15 Pro (iOS 27) via `Scripts/regression.py`, plus headless e2e in `polyfill/`. Wire-level details live in `plan/bridge_protocol.md`; per-sample API analysis in `plan/samples_requirements.md`.
+
+| Feature | Spec | Native source | Test targets |
+|---|---|---|---|
+| immersive-ar core, blend/interaction modes | [WebXR AR Module](https://immersive-web.github.io/webxr-ar-module/) | ARWorldTrackingConfiguration | `polyfill/test/ar-module-conformance.test.ts`; all pages below |
+| immersive-vr (opaque, camera off) | [WebXR Device API](https://immersive-web.github.io/webxr/) | ARKit 6DoF, black background | [tests/exit-button](https://immersive-web.github.io/webxr-samples/tests/exit-button.html) |
+| hit-test (incl. transient input) | [WebXR Hit Test](https://immersive-web.github.io/hit-test/) | ARSession.raycast + JS plane raycast | [hit-test](https://immersive-web.github.io/webxr-samples/hit-test.html), three.js webxr_ar_hittest |
+| anchors | [WebXR Anchors](https://immersive-web.github.io/anchors/) | ARAnchor | [anchors](https://immersive-web.github.io/webxr-samples/anchors.html), [hit-test-anchors](https://immersive-web.github.io/webxr-samples/hit-test-anchors.html) |
+| plane-detection | [WebXR Plane Detection](https://immersive-web.github.io/real-world-geometry/plane-detection.html) | ARPlaneAnchor boundary polygon | [proposals/plane-detection](https://immersive-web.github.io/webxr-samples/proposals/plane-detection.html), three.js webxr_ar_plane_detection |
+| mesh-detection | [WebXR Mesh Detection](https://immersive-web.github.io/real-world-meshing/) | ARMeshAnchor (LiDAR sceneReconstruction) | [proposals/mesh-detection](https://immersive-web.github.io/webxr-samples/proposals/mesh-detection.html) |
+| light-estimation + reflections | [WebXR Lighting Estimation](https://immersive-web.github.io/lighting-estimation/) | ARLightEstimate, AREnvironmentProbeAnchor | three.js webxr_ar_lighting |
+| hand-tracking | [WebXR Hand Input](https://immersive-web.github.io/webxr-hand-input/) | Vision DetectHumanHandPoseRequest + LiDAR smoothedSceneDepth | [immersive-hands](https://immersive-web.github.io/webxr-samples/immersive-hands.html), [webgpu/immersive-hands](https://immersive-web.github.io/webxr-samples/webgpu/immersive-hands.html) |
+| image-tracking | [WebXR Image Tracking explainer](https://github.com/immersive-web/image-tracking/blob/main/explainer.md) | ARReferenceImage / ARImageAnchor (imageSpace = anchor.transform * Rx(-90°)) | `examples/image-tracking.html` (HoloWeb marker, 0.15 m), [PlayCanvas demo](https://playcanv.as/p/PCsSvN5h/), [Needle sample](https://engine.needle.tools/samples/image-tracking/) |
+| dom-overlay | [WebXR DOM Overlays](https://immersive-web.github.io/dom-overlays/) | transparent WKWebView over Metal | plane/mesh-detection samples (root = body) |
+| WebGPU layers | [WebXR/WebGPU binding](https://github.com/immersive-web/WebXR-WebGPU-Binding) (XRGPUBinding) | polyfilled over GPUDevice | [webgpu/immersive-ar-session](https://immersive-web.github.io/webxr-samples/webgpu/immersive-ar-session.html), three.js WebGPURenderer examples |
+| visibility on interruption | WebXR Device API visibilityState | ARSession interruption, app lifecycle | [tests/interrupted-ar](https://immersive-web.github.io/webxr-samples/tests/interrupted-ar.html) |
+
+Image tracking specifics (from the explainer): feature `'image-tracking'`; `XRSessionInit.trackedImages: sequence<{ ImageBitmap image; float widthInMeters }>` snapshotted at requestSession; `session.getTrackedImageScores()` resolves `'trackable' | 'untrackable'` per image; `frame.getImageTrackingResults()` returns `{ [SameObject] imageSpace, index, trackingState: 'tracked' | 'emulated', measuredWidthInMeters (0 if unknown) }`; no `'untracked'` state; untrackable images never appear; no events. Needs a human holding the phone over the printed marker for the "tracked" check.
+
+Not planned: camera-access (AR Module forbids exposing camera images without consent), depth-sensing, persistent anchors.
