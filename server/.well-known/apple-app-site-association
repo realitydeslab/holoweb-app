@@ -1,0 +1,15 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["KR9H35SQQ9.org.realitydeslab.holoweb"],
+        "components": [
+          { "/": "/c*", "comment": "HoloWeb invocation links: /c?url=<encoded page URL>" }
+        ]
+      }
+    ]
+  },
+  "appclips": {
+    "apps": ["KR9H35SQQ9.org.realitydeslab.holoweb.Clip"]
+  }
+}

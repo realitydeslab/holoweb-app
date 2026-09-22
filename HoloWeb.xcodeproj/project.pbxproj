@@ -72,6 +72,7 @@
 		4B1E355F2A7A21A9003EBC46 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		4B1E35612A7A21AB003EBC46 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		4B1E35642A7A21AB003EBC46 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
+		96B0000000000000000000E1 /* HoloWeb.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HoloWeb.entitlements; sourceTree = "<group>"; };
 		9602D0892CE974A200F2820D /* HoloWebClip.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HoloWebClip.entitlements; sourceTree = "<group>"; };
 		9602D08A2CE974A200F2820D /* HoloWebClipApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoloWebClipApp.swift; sourceTree = "<group>"; };
 		9602D08B2CE974A200F2820D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -139,6 +140,7 @@
 				4B1E355F2A7A21A9003EBC46 /* ContentView.swift */,
 				96ACF3BF2E026370006DF723 /* HoloWebApp.swift */,
 				9602D08A2CE974A200F2820D /* HoloWebClipApp.swift */,
+				96B0000000000000000000E1 /* HoloWeb.entitlements */,
 				9602D0892CE974A200F2820D /* HoloWebClip.entitlements */,
 				9602D08B2CE974A200F2820D /* Info.plist */,
 				4B1E35612A7A21AB003EBC46 /* Assets.xcassets */,
@@ -428,6 +430,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = HoloWeb/HoloWeb.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"HoloWeb/Preview Content\"";
@@ -462,6 +465,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = HoloWeb/HoloWeb.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"HoloWeb/Preview Content\"";

@@ -81,3 +81,36 @@ three.js WebGPU-backend XR path needs only: `globalThis.XRGPUBinding` constructo
 - Unknown message type rejects the JS promise with the error string; no frames arrive after endSession.
 - Stereo orientation: HoloKit's Unity LandscapeLeft equals UIInterfaceOrientation.landscapeRight (home side on the right); setMode(.stereo) requests `.landscapeRight`.
 - Renderer now follows the interface orientation (was hardcoded .landscapeRight, wrong in portrait), skips the camera image in stereo, and no longer draws the sample's debug anchor cubes.
+
+## App Clip execution log (M6)
+
+2026-09-22, Xcode 27, device Holo iPhone 15 I (00008130-000848EA38298D3A, iOS 27.0).
+
+### Changes
+- `HoloWeb/HoloWebClip.entitlements`: added `com.apple.developer.associated-domains = [appclips:holoweb.app]` (kept `parent-application-identifiers`).
+- `HoloWeb/HoloWeb.entitlements` (new): `applinks:holoweb.app`, `appclips:holoweb.app`. `CODE_SIGN_ENTITLEMENTS = HoloWeb/HoloWeb.entitlements` set for HoloWeb Debug + Release; file reference added to the HoloWeb group. Patched by Python script; `plutil -lint project.pbxproj` OK.
+- `HoloWeb/HoloWebApp.swift`: `.onContinueUserActivity(NSUserActivityTypeBrowsingWeb)` -> `HoloWebLink.targetURL` -> `state.load`.
+- `HoloWeb/HoloWebClipApp.swift`: on first launch loads `HoloWebLink.targetURL(_XCAppClipURL)` if set; otherwise waits 2 s for an invocation activity, then falls back to `https://holoweb.app/test2/`. Invocation activities that arrive later still load (skipped if same URL). Each load prints `[clip] <source>: <url>` (source = invocation / _XCAppClipURL / default).
+- `HoloWebClip.xcscheme`: `_XCAppClipURL = https://holoweb.app/c?url=https%3A%2F%2Fholoweb.app%2Ftest2%2F` (replaced the old `/launch?url=` value).
+- `server/.well-known/apple-app-site-association` (applinks `/c*` for KR9H35SQQ9.org.realitydeslab.holoweb; appclips KR9H35SQQ9.org.realitydeslab.holoweb.Clip) and `server/README.md` (hosting requirements, smart banner tag, App Store Connect steps).
+
+### Signing
+- Automatic signing provisioned the associated-domains capability for both bundle IDs without manual portal steps. Signed entitlements: HoloWeb.app has `associated-domains = [applinks:holoweb.app, appclips:holoweb.app]` and `associated-appclip-app-identifiers = [KR9H35SQQ9.org.realitydeslab.holoweb.Clip]`; HoloWebClip.app has `associated-domains = [appclips:holoweb.app]`, `on-demand-install-capable = true`.
+
+### Size (Release, generic/platform=iOS, `-allowProvisioningUpdates`) -> BUILD SUCCEEDED
+- `du -sh HoloWebClip.app` = 476 KB uncompressed; main binary `HoloWebClip` = 403,552 bytes (394 KB); default.metallib 22 KB; Web/ 12 KB.
+- vs caps: 15 MB physical-invocation cap -> 3% used; 100 MB digital-only cap -> 0.5%. Physical invocations (App Clip Codes, QR, NFC) are viable. Recheck after the polyfill bundle lands in Web/ (expected < 200 KB).
+
+### Device check
+- `xcodebuild -scheme HoloWebClip -configuration Debug -destination id=00008130-000848EA38298D3A -allowProvisioningUpdates build` -> BUILD SUCCEEDED.
+- `xcrun devicectl device install app ... HoloWebClip.app` -> installed next to the already installed full app `org.realitydeslab.holoweb`; no conflict. (The clip does not appear in `devicectl device info apps`, which only lists the full app.)
+- `timeout 20 xcrun devicectl device process launch --console --terminate-existing --environment-variables '{"_XCAppClipURL":"https://holoweb.app/c?url=https%3A%2F%2Fholoweb.app%2Ftest2%2F"}' ... org.realitydeslab.holoweb.Clip`:
+  `[clip] _XCAppClipURL: https://holoweb.app/test2/`, 38 `[web]` lines incl. `Initialize engine version: 6000.0.17f1`, `Unity WebGPU: Version: WebGPU 1.0`, `RenderGraph is now enabled.` -> target page loads.
+- Distinct URL (`url=https%3A%2F%2Ftoji.github.io%2Fwebxr-particles%2F`): `[clip] _XCAppClipURL: https://toji.github.io/webxr-particles/` plus THREE.js `[web]` warnings -> query parsing drives navigation, not the fallback.
+- No env var: `[clip] default: https://holoweb.app/test2/` after the 2 s wait, page loads.
+- Full app `HoloWeb` scheme device build also BUILD SUCCEEDED with the new entitlements (not reinstalled).
+
+### Manual steps left
+- Deploy `server/.well-known/apple-app-site-association` to https://holoweb.app/.well-known/apple-app-site-association with `Content-Type: application/json` (see server/README.md). Until then universal links / real App Clip invocation cannot be tested; `_XCAppClipURL` is the only path.
+- App Store Connect: default App Clip experience + advanced experience for `https://holoweb.app/c`; replace `APP_STORE_ID` in the smart banner tag once the app record exists.
+- TestFlight invocation test of `https://holoweb.app/c?url=...` from Safari/Messages.

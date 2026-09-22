@@ -30,6 +30,11 @@ struct HoloWebApp: App {
                         state.load(target)
                     }
                 }
+                .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+                    guard let invocation = activity.webpageURL,
+                          let target = HoloWebLink.targetURL(from: invocation) else { return }
+                    state.load(target)
+                }
         }
     }
 }
