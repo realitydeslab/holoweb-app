@@ -49,3 +49,7 @@ Replace `APP_STORE_ID` with the numeric Apple ID of the full app from App Store 
 3. Advanced App Clip experience: App Clip > Advanced App Clip Experiences > add an experience with invocation URL `https://holoweb.app/c`. Apple matches by URL prefix, so this covers `https://holoweb.app/c?url=...`. Set title, subtitle, header image, and action. Leave location unset unless the experience is tied to a place.
 4. Invocation policy: if only digital invocations are used (Safari banner, Messages, Maps, links), the App Clip may be up to 100 MB uncompressed on iOS 17 and later. App Clip Codes, NFC tags, or QR codes require the 15 MB limit.
 5. After App Store Connect validates the AASA file (status shown next to the domain), test the invocation through TestFlight: App Clip testing > add an invocation URL `https://holoweb.app/c?url=https%3A%2F%2Fholoweb.app%2Ftest2%2F`.
+
+
+## Deployment status (2026-09-22)
+The live copy lives in the website repo (realitydeslab/holoweb-website, `public/.well-known/apple-app-site-association`), deployed to GitHub Pages on push to main. This folder mirrors it. The earlier live file used `U3TS5VT3H8` (a personal certificate ID) instead of team `KR9H35SQQ9`, so links never matched; fixed. Both `/launch?url=` and `/c?url=` are claimed. GitHub Pages serves the file as `application/octet-stream`; Apple's CDN (app-site-association.cdn-apple.com) accepts that and caches for up to a day.

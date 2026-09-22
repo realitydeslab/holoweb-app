@@ -4,7 +4,10 @@
       {
         "appIDs": ["KR9H35SQQ9.org.realitydeslab.holoweb"],
         "components": [
-          { "/": "/c*", "comment": "HoloWeb invocation links: /c?url=<encoded page URL>" }
+          { "/": "/launch", "?": { "url": "?*" }, "comment": "holoweb.app/launch?url=<page>" },
+          { "/": "/launch/", "?": { "url": "?*" }, "comment": "trailing-slash variant from static export" },
+          { "/": "/c", "?": { "url": "?*" }, "comment": "holoweb.app/c?url=<page>" },
+          { "/": "/c/", "?": { "url": "?*" }, "comment": "trailing-slash variant from static export" }
         ]
       }
     ]
