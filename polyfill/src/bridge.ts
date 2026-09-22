@@ -9,7 +9,9 @@
 import { mat4 } from 'gl-matrix';
 import type { XRDevice } from 'iwer';
 import { nativeFramebufferSize, devicePixelRatioOrOne } from './device.js';
+import type { NativeAnchorData } from './anchors.js';
 import type { NativePlaneData, PlaneEnvironment } from './hittest.js';
+import { PosePredictor } from './prediction.js';
 import { lookupPhone, type PhoneLookup } from './phones.js';
 import { clampIpd, computeStereo, IPD_DEFAULT, type PixelRect, type StereoParams } from './stereo.js';
 import { isRecord, type Transport } from './webkit.js';
@@ -73,6 +75,7 @@ export interface NativeCallbacks {
   ): void;
   onTracking(tracking: TrackingState): void;
   onPlanes(planes: NativePlaneData[]): void;
+  onAnchors(anchors: NativeAnchorData[]): void;
   onSessionEnded(reason?: string): void;
 }
 
@@ -112,8 +115,17 @@ export class HoloWebBridge {
   onNativeSessionEnded: ((reason?: string) => void) | null = null;
   /** Set by session hooks; called when the render mode (and so the view count) changes. */
   onModeChange: ((mode: RenderMode) => void) | null = null;
+  /** Called with every onPlanes set (local-floor tracking). */
+  readonly planeListeners = new Set<(planes: readonly NativePlaneData[]) => void>();
+  /** Receives onAnchors updates (NativeAnchors). */
+  anchorsHandler: ((anchors: NativeAnchorData[]) => void) | null = null;
+  /** Stereo-only viewer pose prediction; horizonMs 0 disables it. */
+  readonly predictor = new PosePredictor();
+  /** Orientation / framebuffer size changes seen between frames (presentation rescales). */
+  layoutChanges = 0;
   readonly callbacks: NativeCallbacks;
 
+  private lastLayout = '';
   private stereoCache: { key: string; params: StereoParams } | null = null;
   private readonly cameraMatrix = mat4.create();
   private readonly poseMatrix = mat4.create();
@@ -129,7 +141,12 @@ export class HoloWebBridge {
       onTracking: (tracking) => {
         this.tracking = tracking;
       },
-      onPlanes: (planes) => this.environment.setPlanes(Array.isArray(planes) ? planes : []),
+      onPlanes: (planes) => {
+        const list = Array.isArray(planes) ? planes : [];
+        this.environment.setPlanes(list);
+        this.planeListeners.forEach((l) => l(list));
+      },
+      onAnchors: (anchors) => this.anchorsHandler?.(Array.isArray(anchors) ? anchors : []),
       onSessionEnded: (reason) => this.onNativeSessionEnded?.(reason),
     };
   }
@@ -182,6 +199,7 @@ export class HoloWebBridge {
   /** Update the IWER device from a frame packet. */
   applyFrame(packet: FramePacket): void {
     if (packet.mode !== this.mode) this.setLocalMode(packet.mode);
+    this.trackLayout(packet);
 
     // `transform` is the display-oriented camera pose (= inverse(view)) matching `proj`.
     // If a native build sends no usable transform, derive it from the view matrix.
@@ -193,9 +211,12 @@ export class HoloWebBridge {
     }
 
     const device = this.device;
+    const tracked = packet.tracking !== 'notAvailable';
     if (this.mode === 'stereo') {
       const stereo = this.stereo();
-      mat4.translate(this.poseMatrix, cam, stereo.params.cameraToCenterEye);
+      // No camera image to stay in sync with: extrapolate to the expected display time.
+      const predicted = tracked ? this.predictor.predict({ t: packet.t, matrix: cam }) : cam;
+      mat4.translate(this.poseMatrix, predicted, stereo.params.cameraToCenterEye);
       device.stereoEnabled = true;
       device.ipd = this.ipd;
       device.nativeProjection.left = stereo.params.left.projection;
@@ -204,6 +225,8 @@ export class HoloWebBridge {
       device.nativeViewports.left = stereo.left;
       device.nativeViewports.right = stereo.right;
     } else {
+      // Mono: the camera background shows exactly this ARFrame, so never predict.
+      this.predictor.reset();
       mat4.copy(this.poseMatrix, cam);
       device.stereoEnabled = false;
       device.nativeProjection.none = packet.proj;
@@ -213,9 +236,22 @@ export class HoloWebBridge {
       delete device.nativeViewports.right;
     }
     // Keep the last good pose while ARKit has no tracking.
-    if (packet.tracking === 'notAvailable') return;
+    if (!tracked) return;
     mat4.getTranslation(device.position.vec3, this.poseMatrix);
     mat4.getRotation(device.quaternion.quat, this.poseMatrix);
+  }
+
+  private trackLayout(packet: FramePacket): void {
+    const fb = nativeFramebufferSize();
+    const layout = `${packet.orientation ?? ''}|${fb.width}x${fb.height}`;
+    if (this.lastLayout && layout !== this.lastLayout) this.layoutChanges++;
+    this.lastLayout = layout;
+  }
+
+  /** Set the stereo prediction horizon in ms (0 disables). */
+  setPrediction(ms: number): void {
+    this.predictor.horizonMs = Number.isFinite(ms) ? Math.max(0, ms) : 0;
+    this.predictor.reset();
   }
 
   /** HoloKit parameters for the current phone, IPD and framebuffer size (cached). */
@@ -266,6 +302,19 @@ export class HoloWebBridge {
     const latest = this.latest;
     if (!latest) return;
     this.transport.post({ type: 'rendered', t: latest.t }).catch(() => undefined);
+  }
+
+  async createNativeAnchor(pose: ArrayLike<number>): Promise<string> {
+    const reply = await this.transport.post({ type: 'createAnchor', pose: Array.from(pose) });
+    const id = isRecord(reply) ? reply.id : undefined;
+    if (typeof id !== 'string' && typeof id !== 'number') {
+      throw new DOMException('Native anchor creation failed', 'OperationError');
+    }
+    return String(id);
+  }
+
+  async deleteNativeAnchor(id: string): Promise<void> {
+    await this.transport.post({ type: 'deleteAnchor', id });
   }
 
   async endNativeSession(): Promise<void> {

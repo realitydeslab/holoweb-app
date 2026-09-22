@@ -67,9 +67,9 @@ function installNativeResolution(device: XRDevice): void {
     if (!savedStyle || savedStyle.canvas !== canvas) {
       savedStyle = { canvas, width: canvas.style.width, height: canvas.style.height };
     }
-    const size = nativeFramebufferSize();
-    canvas.width = size.width;
-    canvas.height = size.height;
+    // Same fixed size three.js read from layer.framebufferWidth/Height (webgl-layer.ts).
+    canvas.width = baseLayer.framebufferWidth;
+    canvas.height = baseLayer.framebufferHeight;
     canvas.style.width = '100%';
     canvas.style.height = '100%';
   };

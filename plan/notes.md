@@ -190,3 +190,58 @@ Fixed: bridge reset moved from didStartProvisionalNavigation to didCommit (faile
 Re-verified on device: bridge-check 60.0 onFrame/s, anchors round trip, no frames after endSession; three-ar mono 60 fps.
 Open (product decision): pages opened through holoweb.app/c?url= get pose, planes and light with no origin display or consent prompt. Options: show the page origin on session start, per-origin consent, or a first-party allowlist.
 Open (polyfill): re-post `ready` on `pageshow` with persisted=true (bfcache restore does not re-run scripts); onAnchors callback (in progress in M7 batch).
+
+## Polyfill execution log (M7, prediction)
+
+2026-09-22. Scope: `polyfill/` only; not committed; `Scripts/sync-polyfill.sh` not run (it writes HoloWeb/Web, native's side).
+
+### Delivered
+1. **Anchors** (`src/anchors.ts`). `XRFrame.createAnchor` and `XRHitTestResult.createAnchor` post `createAnchor { pose }` (world pose) and resolve with an `XRAnchor` on the `{ id }` reply. `onAnchors` updates anchor spaces. `transform: null` removes the anchor from session/frame `trackedAnchors`, keeps its last pose, and later `delete()` calls post nothing. `delete()` on a live anchor posts `deleteAnchor { id }`. `requestPersistentHandle` rejects NotSupportedError, because ARKit origins differ per session and IWER's persistence is localStorage poses. Ids are dropped when the session ends.
+2. **Light estimation** (`src/light.ts`). `session.requestLightProbe()` (NotSupportedError without the feature), `frame.getLightEstimate(probe)` (null until native sends `light`), `preferredReflectionFormat = 'srgba8'`, and the globals `XRLightProbe` and `XRLightEstimate`. Conversion:
+   - k = lux / 1000; tint = Tanner Helland Kelvin->RGB, normalised to unit Rec.709 luminance.
+   - SH L0 only: c0 = 0.5 * k * tint * 2*sqrt(pi) (projection of constant radiance onto Y00).
+   - primaryLightIntensity = 0.5 * pi * k * tint from direction (0,1,0).
+   - The 50/50 split makes a white upward surface reflect k * tint under three.js' lighting model.
+   - This is a documented choice, not a calibration.
+3. **local-floor reset** (`src/floor.ts`). The floor starts at -1.3 m, then follows the lowest horizontal plane below the origin (only downwards once planes define it). When it moves > 2 cm, every local-floor space gets the new offset plus a `reset` event whose transform is the new origin in the old space.
+4. **Stereo pose prediction** (`src/prediction.ts`). Extrapolates the camera pose from the last two frames (linear translation, slerp with factor 1 + h/dt, normalised), then applies CameraOffset + MrOffset. The default is 25 ms; `__holoweb.setPrediction(ms)` changes it and 0 disables. No prediction when the gap is > 100 ms or out of order, and the factor is capped at 4. Mono resets the predictor and never predicts. `rendered.t` stays the ARFrame timestamp.
+5. **Rotation in mono**: handled without reallocation; the reason is in the code.
+   - three.js ignores `setSize` while presenting. `setXRRenderTargetTextures` only swaps the colour texture, and three's XR render target plus depth-array/MSAA attachments keep their session-start size, so a reallocated layer of a new size would mismatch them.
+   - The polyfill therefore keeps targets fixed (`XRWebGLLayer.framebufferWidth/Height` are now fixed per layer, and the canvas is sized from them).
+   - Presentation scales: the WebGL canvas is CSS-stretched; the WebGPU presenter canvas follows the new size and uses its blit path.
+   - Native's `proj` already matches the new aspect, so geometry is correct and only the sampling density changes. `bridge.layoutChanges` counts orientation or size changes.
+6. **examples/ar-scene.js**:
+   - Adds `anchors` + `light-estimation` to optionalFeatures.
+   - Tap places a mesh on `hit.createAnchor()`, created in-frame, and the mesh follows `trackedAnchors`.
+   - A light probe runs every frame.
+   - `?stats` now logs `anchors`, `placed`, `light` (sh0 + primary) and `nativeLight`.
+   - The native autostart/stats code is kept.
+
+### Verification
+- `npm run typecheck`: clean. `npm run build`: 154.3 KB (47.9 KB gzip), was 148.0. The IWER patch is unchanged (110 lines); all M7 work is outside the patch.
+- `npm test`: 47/47, up from 25.
+  - New `test/prediction.test.ts` (10): linear translation, constant angular velocity (2 deg/frame -> +3 deg at 25 ms), 30 deg/frame about a tilted axis, orthonormality, the shortest path through 180 deg, disabled/unusable samples (0 ms, no prev, dt 0, out of order, gap > 100 ms), factor cap, predictor buffer copy and reset.
+  - New `test/light-floor.test.ts` (7): Kelvin->RGB and the luminance normalisation, the lux/K mapping and energy split, floor tracking/threshold/monotonic behaviour, and reset transforms.
+  - `test/bridge.test.ts` +5, through the real IWER session:
+    - Anchor create/track/move/lost/delete.
+    - Light probe estimate and rejection without the feature.
+    - local-floor reset from onPlanes.
+    - Stereo prediction applied, mono not predicted, `setPrediction(0)` disabling it.
+- `npm run test:e2e`: 10/10.
+  - Every case now also asserts >= 1 tracked native anchor after tap-to-place and a light estimate reaching the page.
+  - New cases: mono rotation to portrait on WebGL and on WebGPU (presenter blit). They assert no errors, the reticle centred within 12 %, and that the bridge saw the layout change.
+  - Portrait screenshots checked by eye: undistorted (round cylinder tops) on both backends.
+- Not run on a device.
+
+### Open issues / for native
+- Anchor ids are sent back as strings (`String(id)`); native should accept string ids in `deleteAnchor`.
+- The prediction horizon is a constant 25 ms from ARFrame arrival. It ignores the rAF phase, so the horizon should be tuned on HoloKit with `?stats` + `setPrediction`.
+- The light conversion is uncalibrated; there is no environment cube map.
+- A mono rotation keeps the session-start resolution until the page re-enters XR.
+- Also done (native's open item): the polyfill re-posts `ready` (with a new WKJSHandle) on `pageshow` with `persisted=true`, because a bfcache restore does not re-run scripts. Unit test added: 48/48; e2e 10/10 re-run; bundle 154.4 KB.
+
+### M7 + stereo prediction on device (iPhone 15 Pro, iOS 27)
+- Polyfill 154.4 KB (48.0 KB gzip); 48/48 unit tests pass locally.
+- three-ar mono (WebGL) and three-ar-webgpu stereo: 60 XR fps, no errors, light estimate reaches the page (native ~930-1050 lux / ~5000-5060 K -> sh0 ~1.8-2.0, primary tint warm-white).
+- Web/xr-anchor-check.html (WebXR Anchors API through polyfill + ARKit): createAnchor resolved in 2.0 ms, tracked at z = -1.000 for 4 s, delete() -> trackedAnchors 0, session ended cleanly.
+- Needs a person with the phone: prediction horizon tuning in HoloKit (`__holoweb.setPrediction(ms)`, default 25 ms), light estimate appearance in real rooms, rotating the phone mid-session in mono, tap-to-place on a real floor.

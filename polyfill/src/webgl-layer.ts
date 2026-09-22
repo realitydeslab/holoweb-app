@@ -13,6 +13,11 @@
  * real opaque framebuffer. IWER reports the canvas drawing buffer, which three.js has just
  * shrunk with setPixelRatio(1) before reading it; the canvas itself is resized to native on
  * the first XR frame (device.ts), so both sides agree.
+ *
+ * The size is fixed per layer for the whole session. three.js sizes its XR render target
+ * once and ignores setSize while presenting, so after a rotation in mono the canvas keeps its
+ * backing size and CSS stretches it to the new viewport; native's projection already matches
+ * the new aspect, so geometry stays correct (only the sampling density changes).
  */
 import { P_SESSION, P_WEBGL_LAYER, XRWebGLLayer } from 'iwer';
 import { nativeFramebufferSize } from './device.js';
@@ -68,18 +73,27 @@ function isWebGL2(ctx: unknown): ctx is GL {
 }
 
 const isImmersive = (layer: XRWebGLLayer) => layer[P_WEBGL_LAYER].session[P_SESSION].mode !== 'inline';
+const layerSizes = new WeakMap<XRWebGLLayer, { width: number; height: number }>();
+const fixedSize = (layer: XRWebGLLayer) => {
+  let size = layerSizes.get(layer);
+  if (!size) {
+    size = nativeFramebufferSize();
+    layerSizes.set(layer, size);
+  }
+  return size;
+};
 
 export function installOpaqueFramebuffer(): void {
   Object.defineProperty(XRWebGLLayer.prototype, 'framebufferWidth', {
     configurable: true,
     get(this: XRWebGLLayer): number {
-      return isImmersive(this) ? nativeFramebufferSize().width : this.context.drawingBufferWidth;
+      return isImmersive(this) ? fixedSize(this).width : this.context.drawingBufferWidth;
     },
   });
   Object.defineProperty(XRWebGLLayer.prototype, 'framebufferHeight', {
     configurable: true,
     get(this: XRWebGLLayer): number {
-      return isImmersive(this) ? nativeFramebufferSize().height : this.context.drawingBufferHeight;
+      return isImmersive(this) ? fixedSize(this).height : this.context.drawingBufferHeight;
     },
   });
   Object.defineProperty(XRWebGLLayer.prototype, 'framebuffer', {

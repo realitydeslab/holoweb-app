@@ -43,6 +43,9 @@ const cases = [
   { page: 'three-ar-webgpu.html', mode: 'mono', switchTo: 'stereo', reenter: true, backend: 'webgpu', views: 2 },
   // eye rects change size under an existing layer (late device info): presenter's scaling blit
   { page: 'three-ar-webgpu.html', mode: 'stereo', lateModel: 'iPhone14,2', backend: 'webgpu', views: 2, path: 'blit' },
+  // rotation to portrait mid-session: fixed-size targets, presentation rescales (reticle must stay centred)
+  { page: 'three-ar.html', mode: 'mono', rotate: true, backend: 'webgl', views: 1 },
+  { page: 'three-ar-webgpu.html', mode: 'mono', rotate: true, backend: 'webgpu', views: 1, path: 'blit' },
 ];
 
 let failures = 0;
@@ -65,7 +68,7 @@ for (const c of cases) {
     await route.fulfill({ body, contentType: 'text/javascript' });
   });
 
-  const label = `${c.page} [${c.mode}${c.switchTo ? ` -> ${c.switchTo}` : ''}${c.reenter ? ', re-enter' : ''}${c.lateModel ? `, late model ${c.lateModel}` : ''}]`;
+  const label = `${c.page} [${c.mode}${c.switchTo ? ` -> ${c.switchTo}` : ''}${c.reenter ? ', re-enter' : ''}${c.lateModel ? `, late model ${c.lateModel}` : ''}${c.rotate ? ', rotate' : ''}]`;
   try {
     await page.goto(`${base}/examples/${c.page}?holoweb-mode=${c.mode}`);
     const gpu = await page.evaluate(async () => Boolean(await navigator.gpu?.requestAdapter()));
@@ -80,6 +83,13 @@ for (const c of cases) {
       const at = await page.evaluate(() => window.__arStatus.xrFrames);
       await page.waitForFunction((n) => window.__arStatus.xrFrames > n + 10, at, { timeout: 5000 });
     }
+    if (c.rotate) {
+      await page.setViewportSize({ width: 390, height: 844 });
+      const at = await page.evaluate(() => window.__arStatus.xrFrames);
+      await page.waitForFunction((n) => window.__arStatus.xrFrames > n + 20, at, { timeout: 5000 });
+      const changes = await page.evaluate(() => window.__holoweb.bridge.layoutChanges);
+      if (changes < 1) problems.push('rotation not seen by the bridge');
+    }
     if (c.lateModel) {
       await page.evaluate((m) => (window.__holoweb.bridge.deviceInfo.model = m), c.lateModel);
       const at = await page.evaluate(() => window.__arStatus.xrFrames);
@@ -87,14 +97,16 @@ for (const c of cases) {
     }
     await page.mouse.click(422, 200);
     await page.waitForFunction(() => window.__arStatus.placed > 0, null, { timeout: 5000 });
+    // the anchor becomes tracked on the XR frame after createAnchor resolves
+    await page.waitForFunction(() => window.__arStatus.anchors > 0, null, { timeout: 5000 }).catch(() => undefined);
     await page.waitForFunction(() => window.__arStatus.xrFrames > 60, null, { timeout: 5000 });
     const status = await page.evaluate(() => window.__arStatus);
     const path = await page.evaluate(() => document.querySelector('[data-holoweb=xr-gpu-presenter]')?.dataset.path ?? 'none');
     if (c.path && path !== c.path) problems.push(`presenter path ${path}, expected ${c.path}`);
     const png = await page.screenshot();
-    const shot = `${c.page.replace('.html', '')}-${c.mode}${c.switchTo ? `-to-${c.switchTo}` : ''}${c.lateModel ? '-late-model' : ''}.png`;
+    const shot = `${c.page.replace('.html', '')}-${c.mode}${c.switchTo ? `-to-${c.switchTo}` : ''}${c.lateModel ? '-late-model' : ''}${c.rotate ? '-rotated' : ''}.png`;
     await writeFile(join(shotDir, shot), png);
-    const reticlePixels = await page.evaluate(async (b64) => {
+    const reticle = await page.evaluate(async (b64) => {
       const img = new Image();
       img.src = `data:image/png;base64,${b64}`;
       await img.decode();
@@ -102,21 +114,34 @@ for (const c of cases) {
       const ctx = cv.getContext('2d');
       ctx.drawImage(img, 0, 0);
       const d = ctx.getImageData(0, 0, img.width, img.height).data;
-      let n = 0;
-      for (let i = 0; i < d.length; i += 4) if (d[i] < 120 && d[i + 1] > 170 && d[i + 2] > 200) n++;
-      return n;
+      let n = 0, sx = 0, sy = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i] < 120 && d[i + 1] > 170 && d[i + 2] > 200) {
+          n++;
+          sx += (i / 4) % img.width;
+          sy += Math.floor(i / 4 / img.width);
+        }
+      }
+      return { n, cx: n ? sx / n / img.width : 0, cy: n ? sy / n / img.height : 0 };
     }, png.toString('base64'));
+    const reticlePixels = reticle.n;
 
     const expectBackend = c.backend === 'webgpu' && !gpu ? 'webgl' : c.backend;
     if (status.backend !== expectBackend) problems.push(`backend ${status.backend}, expected ${expectBackend}`);
     if (status.views !== c.views) problems.push(`views ${status.views}, expected ${c.views}`);
     if (status.xrFrames < 30) problems.push(`only ${status.xrFrames} XR frames`);
     if (reticlePixels < 50) problems.push(`reticle not visible (${reticlePixels} px)`);
+    if (c.rotate && (Math.abs(reticle.cx - 0.5) > 0.12 || Math.abs(reticle.cy - 0.5) > 0.12)) {
+      problems.push(`reticle off-centre after rotation (${reticle.cx.toFixed(2)}, ${reticle.cy.toFixed(2)})`);
+    }
+    if (status.anchors < 1) problems.push('no tracked anchor after placing');
+    if (!status.light || !(status.light.sh0 > 0)) problems.push('no light estimate');
     if (c.backend === 'webgpu' && !status.sessionFeatures.includes('webgpu')) problems.push('webgpu feature missing');
     problems.push(...status.errors.map((e) => `page error: ${e}`));
     console.log(
       `${problems.length ? 'FAIL' : 'PASS'} ${label}: backend=${status.backend} gpuAdapter=${gpu} views=${status.views} ` +
-        `xrFrames=${status.xrFrames} hitFrames=${status.hitFrames} placed=${status.placed} reticlePx=${reticlePixels} presenter=${path}`,
+        `xrFrames=${status.xrFrames} hitFrames=${status.hitFrames} placed=${status.placed} anchors=${status.anchors} ` +
+        `light=${JSON.stringify(status.light)} reticlePx=${reticlePixels} presenter=${path}`,
     );
   } catch (err) {
     problems.push(String(err.message ?? err).split('\n')[0]);

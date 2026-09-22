@@ -1,0 +1,36 @@
+<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="margin:0;background:transparent">
+<script>
+// Exercises the WebXR Anchors API end to end through the polyfill and native ARKit anchors.
+const log = (...a) => console.log("[anchor-check] " + a.join(" "));
+(async () => {
+  const canvas = document.createElement("canvas"); document.body.appendChild(canvas);
+  const gl = canvas.getContext("webgl2", { xrCompatible: true, alpha: true });
+  const session = await navigator.xr.requestSession("immersive-ar", { requiredFeatures: ["anchors"], optionalFeatures: ["local-floor"] });
+  session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+  const local = await session.requestReferenceSpace("local");
+  let frames = 0, anchor = null, created = false, t0 = 0;
+  session.requestAnimationFrame(function onFrame(time, frame) {
+    frames++;
+    if (frames === 30 && !created) {
+      created = true; t0 = performance.now();
+      frame.createAnchor(new XRRigidTransform({ x: 0, y: 0, z: -1 }), local)
+        .then(a => { anchor = a; log("created in", (performance.now() - t0).toFixed(1), "ms"); }, e => log("create FAILED", e.message));
+    }
+    if (anchor && frame.trackedAnchors.has(anchor) && frames % 30 === 0) {
+      const p = frame.getPose(anchor.anchorSpace, local);
+      log("tracked:", frame.trackedAnchors.size, "pose z:", p ? p.transform.position.z.toFixed(3) : "null");
+    }
+    if (frames === 150) {
+      anchor?.delete();
+      log("deleted; frames:", frames);
+    }
+    if (frames === 180) {
+      log("after delete trackedAnchors:", frame.trackedAnchors.size);
+      session.end().then(() => log("DONE"));
+      return;
+    }
+    session.requestAnimationFrame(onFrame);
+  });
+})().catch(e => log("ERROR", e.message));
+</script></body></html>

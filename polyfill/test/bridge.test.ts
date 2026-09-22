@@ -4,10 +4,15 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import type { HoloWebGlobal } from '../src/index.js';
 import { computeStereo, applyDepthRange } from '../src/stereo.js';
 import { lookupPhone } from '../src/phones.js';
+import { extrapolatePose } from '../src/prediction.js';
+import { lightTerms } from '../src/light.js';
 
 type Msg = Record<string, unknown> & { type: string };
 const posted: Msg[] = [];
+let anchorSeq = 0;
 const replies: Record<string, unknown> = {
+  createAnchor: () => ({ id: `a${++anchorSeq}` }),
+  deleteAnchor: { ok: true },
   ready: {
     ok: true,
     device: { model: 'iPhone16,1', screenWidthPx: 2556, screenHeightPx: 1179, scale: 3, dpi: 460 },
@@ -22,7 +27,13 @@ const replies: Record<string, unknown> = {
 let hw: HoloWebGlobal;
 // Minimal structural view of the IWER objects the tests touch.
 interface TestView { eye: string; projectionMatrix: Float32Array; transform: { matrix: Float32Array } }
+interface TestAnchor { anchorSpace: unknown; delete(): void }
+interface TestLightEstimate { sphericalHarmonicsCoefficients: Float32Array; primaryLightIntensity: DOMPointReadOnly }
 interface TestFrame {
+  trackedAnchors: Set<TestAnchor>;
+  createAnchor(pose: unknown, space: unknown): Promise<TestAnchor>;
+  getPose(space: unknown, base: unknown): { transform: { matrix: Float32Array } } | null;
+  getLightEstimate(probe: unknown): TestLightEstimate | null;
   getViewerPose(space: unknown): { views: TestView[]; transform: { matrix: Float32Array } } | null;
   getHitTestResults(source: unknown): { getPose(space: unknown): { transform: { matrix: Float32Array } } }[];
 }
@@ -33,6 +44,7 @@ interface TestSession {
   requestReferenceSpace(t: string): Promise<unknown>;
   requestAnimationFrame(cb: (t: number, f: TestFrame) => void): number;
   requestHitTestSource(o: { space: unknown }): Promise<unknown>;
+  requestLightProbe(): Promise<unknown>;
   addEventListener(t: string, cb: () => void): void;
   end(): Promise<void>;
 }
@@ -66,7 +78,8 @@ beforeAll(async () => {
       holoweb: {
         postMessage: (m: Msg) => {
           posted.push(m);
-          return Promise.resolve(replies[m.type] ?? { ok: true });
+          const r = replies[m.type];
+          return Promise.resolve(typeof r === 'function' ? r(m) : (r ?? { ok: true }));
         },
       },
     },
@@ -90,6 +103,14 @@ describe('bridge ready handshake', () => {
   it('stores the device info from the ready reply', () => {
     expect(hw.bridge.deviceInfo?.model).toBe('iPhone16,1');
     expect(hw.bridge.phone.match).toBe('exact');
+  });
+
+  it('re-posts ready after a back/forward-cache restore', async () => {
+    const before = posted.filter((m) => m.type === 'ready').length;
+    window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: false }));
+    window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+    await Promise.resolve();
+    expect(posted.filter((m) => m.type === 'ready').length).toBe(before + 1);
   });
 
   it('installs navigator.xr and supports immersive-ar', async () => {
@@ -210,5 +231,113 @@ describe('native-initiated end', () => {
     hw.onSessionEnded('interrupted');
     await ended;
     expect(posted.filter((m) => m.type === 'endSession').length).toBe(before);
+  });
+});
+
+describe('M7: anchors, light estimation, local-floor reset, stereo prediction', () => {
+  let session: TestSession;
+  // read lazily: describe bodies run before beforeAll installs the runtime
+  const rigid = (p: DOMPointInit) =>
+    new (globalThis as unknown as { XRRigidTransform: new (p: DOMPointInit) => unknown }).XRRigidTransform(p);
+  const translation = (m: Float32Array) => [m[12], m[13], m[14]].map((v) => +v.toFixed(4));
+
+  beforeAll(async () => {
+    session = await xr().requestSession('immersive-ar', {
+      optionalFeatures: ['anchors', 'light-estimation', 'local-floor', 'hit-test', 'webgpu'],
+    });
+    session.updateRenderState({ layers: [{}], depthNear: 0.1, depthFar: 50 });
+    hw.onFrame(10, 'mono', Array.from(camPose), Array.from(camView), Array.from(arkitProj), null, 'normal');
+    await inFrame(session);
+  });
+
+  it('creates native anchors, follows onAnchors, drops lost anchors, deletes on delete()', async () => {
+    const local = await session.requestReferenceSpace('local');
+    const pending = await inFrame(session, (f) => f.createAnchor(rigid({ x: 0.1, y: 0, z: -1 }), local));
+    const anchor = await pending;
+    const req = posted.filter((m) => m.type === 'createAnchor').at(-1) as unknown as { pose: number[] };
+    expect(translation(Float32Array.from(req.pose))).toEqual([0.1, 0, -1]);
+
+    const tracked = await inFrame(session, (f) => ({
+      has: f.trackedAnchors.has(anchor),
+      pos: translation(f.getPose(anchor.anchorSpace, local)!.transform.matrix),
+    }));
+    expect(tracked).toEqual({ has: true, pos: [0.1, 0, -1] });
+
+    const id = `a${anchorSeq}`;
+    hw.onAnchors([{ id, transform: Array.from(mat4.fromTranslation(mat4.create(), [0.2, 0.05, -1])) }]);
+    const moved = await inFrame(session, (f) => translation(f.getPose(anchor.anchorSpace, local)!.transform.matrix));
+    expect(moved).toEqual([0.2, 0.05, -1]);
+
+    hw.onAnchors([{ id, transform: null }]);
+    expect(await inFrame(session, (f) => f.trackedAnchors.has(anchor))).toBe(false);
+    const deletesBefore = posted.filter((m) => m.type === 'deleteAnchor').length;
+    anchor.delete(); // native already removed it: no deleteAnchor
+    expect(posted.filter((m) => m.type === 'deleteAnchor').length).toBe(deletesBefore);
+
+    const second = await (await inFrame(session, (f) => f.createAnchor(rigid({ x: 0, y: 0, z: -2 }), local)));
+    second.delete();
+    expect(posted.at(-1)).toEqual({ type: 'deleteAnchor', id: `a${anchorSeq}` });
+    expect(await inFrame(session, (f) => f.trackedAnchors.has(second))).toBe(false);
+  });
+
+  it('provides light estimates from onFrame light', async () => {
+    const probe = await session.requestLightProbe();
+    const light = { ambientIntensity: 2000, ambientColorTemperature: 3000 };
+    hw.onFrame(11, 'mono', Array.from(camPose), Array.from(camView), Array.from(arkitProj), light, 'normal');
+    const est = await inFrame(session, (f) => f.getLightEstimate(probe));
+    const expected = lightTerms(light);
+    expect(est!.sphericalHarmonicsCoefficients[0]).toBeCloseTo(expected.sphericalHarmonicsCoefficients[0], 5);
+    expect(est!.primaryLightIntensity.x).toBeGreaterThan(est!.primaryLightIntensity.z); // 3000 K is warm
+  });
+
+  it('moves local-floor to a new lower plane and dispatches reset', async () => {
+    const floor = await session.requestReferenceSpace('local-floor');
+    const local = await session.requestReferenceSpace('local');
+    let resets = 0;
+    (floor as EventTarget).addEventListener('reset', () => resets++);
+    const plane = (y: number) => ({ id: 'p', transform: Array.from(mat4.fromTranslation(mat4.create(), [0, y, 0])), extent: [5, 5], orientation: 'horizontal' as const });
+    // hit-test planes from the earlier test put the floor at y=0 only if below origin; use y < 0 here
+    hw.onPlanes([plane(-0.9)]);
+    const y1 = await inFrame(session, (f) => f.getPose(floor, local)!.transform.matrix[13]);
+    hw.onPlanes([plane(-0.905)]); // < 2 cm: no reset
+    hw.onPlanes([plane(-1.1)]);
+    const y2 = await inFrame(session, (f) => f.getPose(floor, local)!.transform.matrix[13]);
+    expect(y1).toBeCloseTo(-0.9, 5);
+    expect(y2).toBeCloseTo(-1.1, 5);
+    expect(resets).toBe(2);
+  });
+
+  it('predicts the stereo viewer pose 25 ms ahead, never in mono, and setPrediction(0) disables it', async () => {
+    const local = await session.requestReferenceSpace('local');
+    const at = (x: number) => mat4.fromRotationTranslation(mat4.create(), [0, 0, 0, 1], [x, 1.5, 0]);
+    const s = computeStereo(lookupPhone('iPhone16,1').phone, { w: 2556, h: 1179, scale: 3 }, 0.064, 0.1, 50);
+    const viewerX = () => inFrame(session, (f) => f.getViewerPose(local)!.transform.matrix[12]);
+
+    // mono: pose follows the frame exactly even while moving
+    hw.onFrame(1000, 'mono', Array.from(at(0)), Array.from(invert(at(0))), Array.from(arkitProj), null, 'normal');
+    hw.onFrame(1016.67, 'mono', Array.from(at(0.01)), Array.from(invert(at(0.01))), Array.from(arkitProj), null, 'normal');
+    expect(await viewerX()).toBeCloseTo(0.01, 5);
+
+    // stereo: centre eye of the extrapolated camera pose
+    hw.onFrame(2000, 'stereo', Array.from(at(0)), Array.from(invert(at(0))), Array.from(arkitProj), null, 'normal');
+    hw.onFrame(2016.67, 'stereo', Array.from(at(0.01)), Array.from(invert(at(0.01))), Array.from(arkitProj), null, 'normal');
+    const predicted = extrapolatePose({ t: 2000, matrix: at(0) }, { t: 2016.67, matrix: at(0.01) }, 25);
+    const centre = mat4.translate(mat4.create(), predicted, s.cameraToCenterEye);
+    expect(predicted[12]).toBeCloseTo(0.025, 3);
+    expect(await viewerX()).toBeCloseTo(centre[12], 5);
+
+    hw.setPrediction(0);
+    hw.onFrame(2033.33, 'stereo', Array.from(at(0.02)), Array.from(invert(at(0.02))), Array.from(arkitProj), null, 'normal');
+    hw.onFrame(2050, 'stereo', Array.from(at(0.03)), Array.from(invert(at(0.03))), Array.from(arkitProj), null, 'normal');
+    const exact = mat4.translate(mat4.create(), at(0.03), s.cameraToCenterEye);
+    expect(await viewerX()).toBeCloseTo(exact[12], 5);
+    hw.setPrediction(25);
+    await session.end();
+  });
+
+  it('rejects requestLightProbe without the light-estimation feature', async () => {
+    const inline = await xr().requestSession('inline');
+    await expect(inline.requestLightProbe()).rejects.toMatchObject({ name: 'NotSupportedError' });
+    await inline.end();
   });
 });

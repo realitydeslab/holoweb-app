@@ -1,5 +1,6 @@
 // Shared three.js AR hit-test scene (port of three.js webxr_ar_hittest) for the HoloWeb examples.
-// window.__arStatus is read by scripts/e2e.mjs.
+// Taps place objects on native anchors (hit.createAnchor) when 'anchors' is granted, and the
+// light estimate is read every frame. window.__arStatus is read by scripts/e2e.mjs.
 import * as THREE from 'three/webgpu';
 import { ARButton } from 'three/addons/webxr/ARButton.js';
 
@@ -11,8 +12,12 @@ export function runARScene({ renderer, sessionInit }) {
     placed: 0,
     sessionFeatures: [],
     views: 0,
+    anchors: 0,
+    light: null,
     errors: [],
   });
+  // exercise anchors + light estimation when the runtime offers them
+  sessionInit.optionalFeatures = [...new Set([...(sessionInit.optionalFeatures ?? []), 'anchors', 'light-estimation'])];
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.01, 20);
@@ -36,15 +41,58 @@ export function runARScene({ renderer, sessionInit }) {
   scene.add(reticle);
 
   const cylinder = new THREE.CylinderGeometry(0.1, 0.1, 0.2, 32).translate(0, 0.1, 0);
-  const controller = renderer.xr.getController(0);
-  controller.addEventListener('select', () => {
-    if (!reticle.visible) return;
+  const newMesh = () => {
     const mesh = new THREE.Mesh(cylinder, new THREE.MeshPhongMaterial({ color: 0xffffff * Math.random() }));
-    reticle.matrix.decompose(mesh.position, mesh.quaternion, mesh.scale);
     scene.add(mesh);
     status.placed++;
+    return mesh;
+  };
+  // Anchors must be created from a hit result of the current frame, so select only flags it.
+  let placeRequested = false;
+  const anchored = []; // { anchor, mesh }
+  const controller = renderer.xr.getController(0);
+  controller.addEventListener('select', () => {
+    if (reticle.visible) placeRequested = true;
   });
   scene.add(controller);
+
+  function place(frame, hit) {
+    placeRequested = false;
+    const session = frame.session;
+    if (session.enabledFeatures.includes('anchors') && hit.createAnchor) {
+      hit.createAnchor().then(
+        (anchor) => anchored.push({ anchor, mesh: newMesh() }),
+        (e) => status.errors.push('createAnchor: ' + e.message),
+      );
+    } else {
+      const mesh = newMesh();
+      reticle.matrix.decompose(mesh.position, mesh.quaternion, mesh.scale);
+    }
+  }
+
+  function updateAnchors(frame, referenceSpace) {
+    const tracked = frame.trackedAnchors;
+    status.anchors = tracked ? tracked.size : 0;
+    for (const { anchor, mesh } of anchored) {
+      const live = tracked && tracked.has(anchor);
+      mesh.visible = Boolean(live);
+      if (!live) continue;
+      const pose = frame.getPose(anchor.anchorSpace, referenceSpace);
+      if (pose) {
+        mesh.matrix.fromArray(pose.transform.matrix);
+        mesh.matrix.decompose(mesh.position, mesh.quaternion, mesh.scale);
+      }
+    }
+  }
+
+  let lightProbe = null;
+  function updateLight(frame) {
+    const est = lightProbe && frame.getLightEstimate(lightProbe);
+    if (!est) return;
+    const p = est.primaryLightIntensity;
+    const r2 = (v) => Math.round(v * 100) / 100;
+    status.light = { sh0: r2(est.sphericalHarmonicsCoefficients[0]), primary: [r2(p.x), r2(p.y), r2(p.z)] };
+  }
 
   let hitTestSource = null;
   let hitTestRequested = false;
@@ -53,6 +101,10 @@ export function runARScene({ renderer, sessionInit }) {
     const session = renderer.xr.getSession();
     status.sessionFeatures = [...session.enabledFeatures];
     status.backend = renderer.backend.isWebGPUBackend ? 'webgpu' : 'webgl';
+    lightProbe = null;
+    if (session.enabledFeatures.includes('light-estimation') && session.requestLightProbe) {
+      session.requestLightProbe().then((probe) => (lightProbe = probe), (e) => status.errors.push('lightProbe: ' + e.message));
+    }
   });
 
   function render(timestamp, frame) {
@@ -78,8 +130,11 @@ export function runARScene({ renderer, sessionInit }) {
         if (hits.length) {
           status.hitFrames++;
           reticle.matrix.fromArray(hits[0].getPose(referenceSpace).transform.matrix);
+          if (placeRequested) place(frame, hits[0]);
         }
       }
+      updateAnchors(frame, referenceSpace);
+      updateLight(frame);
     }
     renderer.render(scene, camera);
   }
@@ -106,6 +161,8 @@ export function runARScene({ renderer, sessionInit }) {
         xrFps: (status.xrFrames - lastFrames) / 2, views: status.views, backend: status.backend,
         hitFrames: status.hitFrames, features: status.sessionFeatures,
         latencyMs: latest?.latencyMs, mode: latest?.mode, tracking: latest?.tracking,
+        anchors: status.anchors, placed: status.placed, light: status.light,
+        nativeLight: latest?.light ?? null,
         canvas: [renderer.domElement.width, renderer.domElement.height], errors: status.errors.slice(-3),
       }));
       lastFrames = status.xrFrames;

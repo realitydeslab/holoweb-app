@@ -49,11 +49,18 @@ export function createMockTransport(options: MockOptions = {}): Transport {
   const target =
     options.target ?? (() => (globalThis as unknown as { __holoweb?: NativeCallbacks }).__holoweb);
   let timer: ReturnType<typeof setInterval> | null = null;
+  let frameIndex = 0;
   const start = performance.now();
+  // Anchors stay where they were created (a static world); echoed at 10 Hz like native.
+  const anchors = new Map<string, number[]>();
+  let nextAnchor = 1;
 
   const pushFrame = () => {
     const cb = target();
     if (!cb) return;
+    if (++frameIndex % 6 === 0 && anchors.size > 0) {
+      cb.onAnchors([...anchors].map(([id, transform]) => ({ id, transform })));
+    }
     const t = (performance.now() - start) / 1000;
     const pose = mockCameraPose(t);
     const view = mat4.invert(mat4.create(), pose) ?? mat4.create();
@@ -99,6 +106,7 @@ export function createMockTransport(options: MockOptions = {}): Transport {
     },
     endSession: () => {
       stop();
+      anchors.clear();
       return { ok: true };
     },
     setMode: (msg) => {
@@ -107,6 +115,15 @@ export function createMockTransport(options: MockOptions = {}): Transport {
     },
     hitTest: () => ({ hits: [] }),
     rendered: () => null,
+    createAnchor: (msg) => {
+      const id = `mock-anchor-${nextAnchor++}`;
+      anchors.set(id, Array.isArray(msg.pose) ? (msg.pose as number[]) : Array.from(mat4.create()));
+      return { id };
+    },
+    deleteAnchor: (msg) => {
+      anchors.delete(String(msg.id));
+      return { ok: true };
+    },
     log: (msg) => {
       console.log(`[holoweb-native:${String(msg.level)}] ${String(msg.message)}`);
       return { ok: true };

@@ -5,7 +5,7 @@ WebXR runtime that the HoloWeb iOS app injects into its WKWebView. It installs `
 (`plan/bridge_protocol.md`), and renders in mono (handheld) or HoloKit X stereo.
 WebGL pages use `XRWebGLLayer`; WebGPU pages use the `XRGPUBinding` polyfill.
 
-Output: `dist/holoweb-polyfill.js` (minified IIFE, ~148 KB, ~46 KB gzip) and
+Output: `dist/holoweb-polyfill.js` (minified IIFE, ~154 KB, ~48 KB gzip) and
 `dist/holoweb-polyfill.dev.js` (unminified, inline source map). Native loads the minified file
 as a `WKUserScript` at document start, main frame only, page world.
 
@@ -33,6 +33,10 @@ and `?holoweb-model=iPhone17,1` override the mock.
 | `src/bridge.ts` | Protocol v1: `ready` handshake with `WKJSHandle`, `onFrame` -> device pose/projection/viewports, `rendered`, commands |
 | `src/session.ts` | `requestSession`/`endSession` to native, `local`/`local-floor` spaces, dom-overlay |
 | `src/stereo.ts`, `src/phones.ts` | HoloKit X math and the iOS phone table (from the Unity SDK) |
+| `src/prediction.ts` | Stereo-only pose extrapolation (default 25 ms, `__holoweb.setPrediction(ms)`, 0 = off) |
+| `src/anchors.ts` | `createAnchor` / `deleteAnchor` / `onAnchors` behind IWER's `XRAnchor` |
+| `src/light.ts` | `requestLightProbe` / `getLightEstimate` from ARKit ambient lux + kelvin |
+| `src/floor.ts` | `local-floor` height from planes, `reset` event when it moves > 2 cm |
 | `src/hittest.ts` | Ray vs ARKit planes, plugged into IWER's hit-test plumbing as its environment module |
 | `src/input.ts` | Screen tap -> transient `screen` (mono) / `gaze` (stereo) input source, `select` events |
 | `src/webgl-layer.ts` | Non-null opaque `XRWebGLLayer.framebuffer` + fixed framebuffer size |
@@ -88,6 +92,21 @@ the device config. The config sets `userAgent` to the real UA, because IWER over
 - While an immersive session runs, page content is hidden (`visibility`) except the XR canvases and the
   dom-overlay root, and html/body backgrounds are forced transparent so the native camera (mono) or
   black (stereo) shows through, matching what a real immersive session displays.
+- Anchors are ARKit anchors: `XRFrame.createAnchor` / `XRHitTestResult.createAnchor` post `createAnchor`,
+  `onAnchors` moves anchor spaces, `transform: null` drops the anchor from `trackedAnchors`, `delete()` posts
+  `deleteAnchor`. `requestPersistentHandle` rejects (ARKit origins differ per session).
+- Light estimation: ARKit `ambientIntensity` (1000 lux = neutral) and `ambientColorTemperature` become an L0-only
+  SH term plus a directional light from above, split so a white upward surface reflects `k * tint`; the conversion
+  constants are documented in `src/light.ts`.
+- `local-floor` starts 1.3 m below the origin, moves to the lowest horizontal plane (only downwards once planes
+  define it) and dispatches `reset` when it moves by more than 2 cm.
+- Stereo pose prediction: the viewer pose is extrapolated from the last two ARKit frames (linear translation,
+  slerp rotation) by 25 ms. Mono never predicts, because the camera background is drawn for the reported `rendered` frame.
+- Rotation in mono: render targets keep their session-start size. three.js ignores `setSize` while presenting
+  and allocates its XR targets once (reallocating the layer would mismatch its depth attachment). The WebGL canvas
+  keeps its backing store and CSS stretches it; the WebGPU presenter canvas follows the new size and scales the
+  layer. Native's projection already matches the new aspect, so geometry is correct; only the sampling density
+  changes until the page re-enters XR.
 - Mono <-> stereo mid-session: WebGL pages follow the view-count change (1 <-> 2). three.js' WebGPU
   backend builds per-view render passes once per session, so an `XRGPUBinding` session is ended on a
   mode change (console warning) and the page can enter again.
@@ -117,7 +136,7 @@ the device config. The config sets `userAgent` to the real UA, because IWER over
   Quest), but HoloKit eye rects then land (H - 2y - h) px higher (~130 of 780 px in the e2e run).
   The WebGPU backend path and classic `WebGLRenderer` are correct. Upstream fix: XRManager should pass
   `y = framebufferHeight - y - height` on the WebGL backend.
-- `light-estimation` is advertised (task feature list) but IWER has no `XRLightProbe`; the latest
-  ARKit light estimate is only stored on `__holoweb.bridge.latest.light`.
+- Light estimation has no reflection cube map (`reflectionchange` never fires) and no measured calibration.
 - `XRGPUBinding.createProjectionLayer({ textureType: 'texture' })` is rejected; only `texture-array`.
-- Canvas / layer sizes are fixed at session start; an interface rotation during a mono session is not handled.
+- After a mono rotation the image is resampled (e.g. a 2556x1179 target shown at 1179x2556): correct geometry,
+  lower vertical detail, until the session is re-entered.

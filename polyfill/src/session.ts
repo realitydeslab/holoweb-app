@@ -5,7 +5,7 @@
  *   `endSession` when the page or native ends the session, and post `rendered { t }` after each
  *   XR frame. Inline sessions stay JS-only.
  * - Reference spaces follow plan/bridge_protocol.md: `local` = ARKit world origin,
- *   `local-floor` = lowest horizontal plane below the origin, else 1.3 m down.
+ *   `local-floor` follows FloorTracker (floor.ts), which dispatches `reset` when the floor moves.
  * - While immersive, page content is hidden (as in a real immersive session) except the XR
  *   canvases and the dom-overlay root, and html/body backgrounds are transparent so the native
  *   camera view (mono) or black (stereo) shows through.
@@ -17,28 +17,18 @@
 import { mat4 } from 'gl-matrix';
 import { P_DEVICE, P_SPACE, XRDevice, XRReferenceSpace, XRSession, XRSystem } from 'iwer';
 import type { XRSessionInit, XRSessionMode } from 'iwer/lib/session/XRSession.js';
+import type { NativeAnchors } from './anchors.js';
 import type { HoloWebBridge } from './bridge.js';
 import { addFrameEndListener } from './device.js';
+import { FloorTracker } from './floor.js';
 import { XRGPUProjectionLayer } from './gpu-binding.js';
 import type { ScreenInput } from './input.js';
 
-export const DEFAULT_FLOOR_OFFSET = 1.3;
 const OVERLAY_Z_INDEX = '1000';
 
 type SessionOptions = XRSessionInit & { domOverlay?: { root?: Element } };
 
-/** World-space height of local-floor: lowest horizontal plane below the origin, else -1.3 m. */
-export function floorHeight(bridge: HoloWebBridge): number {
-  let floor = Infinity;
-  for (const plane of bridge.environment.planeData) {
-    if (plane.orientation !== 'horizontal') continue;
-    const y = plane.transform[13];
-    if (y < 0 && y < floor) floor = y;
-  }
-  return Number.isFinite(floor) ? floor : -DEFAULT_FLOOR_OFFSET;
-}
-
-function patchReferenceSpaces(session: XRSession, bridge: HoloWebBridge): void {
+function patchReferenceSpaces(session: XRSession, floor: FloorTracker): void {
   const original = session.requestReferenceSpace.bind(session);
   session.requestReferenceSpace = async (type) => {
     const space: XRReferenceSpace = await original(type);
@@ -46,7 +36,7 @@ function patchReferenceSpaces(session: XRSession, bridge: HoloWebBridge): void {
       // IWER anchors `local` at the viewer pose at request time; ARKit's origin is gravity aligned.
       mat4.identity(space[P_SPACE].offsetMatrix);
     } else if (type === 'local-floor') {
-      mat4.fromTranslation(space[P_SPACE].offsetMatrix, [0, floorHeight(bridge), 0]);
+      floor.track(space);
     }
     return space;
   };
@@ -89,14 +79,20 @@ function raiseOverlay(root: Element | undefined): (() => void) | null {
   };
 }
 
-export function installSessionHooks(device: XRDevice, bridge: HoloWebBridge, input: ScreenInput): void {
+export function installSessionHooks(
+  device: XRDevice,
+  bridge: HoloWebBridge,
+  input: ScreenInput,
+  anchors: NativeAnchors,
+): void {
   const xr = device[P_DEVICE].xrSystem;
   if (!(xr instanceof XRSystem)) throw new Error('HoloWeb: installRuntime must run before session hooks');
   const iwerRequestSession = xr.requestSession.bind(xr);
 
   xr.requestSession = async (mode: XRSessionMode, options: SessionOptions = {}): Promise<XRSession> => {
     const session = await iwerRequestSession(mode, options);
-    patchReferenceSpaces(session, bridge);
+    const floor = new FloorTracker(bridge.environment.planeData);
+    patchReferenceSpaces(session, floor);
     if (mode !== 'immersive-ar') return session;
 
     let endedByNative = false;
@@ -120,6 +116,8 @@ export function installSessionHooks(device: XRDevice, bridge: HoloWebBridge, inp
     const removeRendered = addFrameEndListener(device, (frame) => {
       if (frame.session === session) bridge.markRendered();
     });
+    const onPlanes = (planes: Parameters<FloorTracker['update']>[0]) => floor.update(planes);
+    bridge.planeListeners.add(onPlanes);
     input.attach(session, overlayRoot ?? null);
 
     bridge.onModeChange = (newMode) => {
@@ -138,6 +136,8 @@ export function installSessionHooks(device: XRDevice, bridge: HoloWebBridge, inp
         restoreOverlay?.();
         restoreStyle();
         removeRendered();
+        bridge.planeListeners.delete(onPlanes);
+        anchors.clear();
         bridge.onNativeSessionEnded = null;
         bridge.onModeChange = null;
         if (!endedByNative) bridge.endNativeSession().catch((e) => console.warn('HoloWeb endSession', e));
