@@ -16,7 +16,7 @@ npm install          # also applies patches/iwer+2.4.0.patch (postinstall: patch
 npm run build        # dist/*.js, fails if > 250 KB or if IWER remote/native code is bundled
 npm test             # vitest: stereo golden values, bridge + session behaviour (happy-dom)
 npm run typecheck    # tsc --noEmit, strict
-npm run test:e2e     # headless Chromium: both examples x {mono, stereo} against mock-native
+npm run test:e2e     # headless Chromium against mock-native: examples in mono/stereo, native toggles, rotation, demo.html
 ```
 
 Desktop development: open `examples/three-ar.html` (WebGL2 backend) or
@@ -107,9 +107,20 @@ the device config. The config sets `userAgent` to the real UA, because IWER over
   keeps its backing store and CSS stretches it; the WebGPU presenter canvas follows the new size and scales the
   layer. Native's projection already matches the new aspect, so geometry is correct; only the sampling density
   changes until the page re-enters XR.
-- Mono <-> stereo mid-session: WebGL pages follow the view-count change (1 <-> 2). three.js' WebGPU
-  backend builds per-view render passes once per session, so an `XRGPUBinding` session is ended on a
-  mode change (console warning) and the page can enter again.
+- Mono <-> stereo mid-session (normal flow: Start AR in mono, then the app's native toggle button): the
+  session keeps running and the view count follows the mode (1 <-> 2) on both backends.
+  - WebGL: follows directly (viewports + projections per frame).
+  - WebGPU (`XRGPUBinding`): three.js r186 caches its intermediate target's render-pass descriptor under a
+    key without the ArrayCamera size and builds one colour attachment per camera on first use, so a
+    descriptor first built for 1 camera crashes at the switch to 2 (`_createArrayCameraLayerDescriptors`,
+    `colorAttachments[1]` undefined), while one built for 2 cameras serves both. The polyfill therefore primes
+    it: in mono, until the page has rendered two views for 3 frames, `getViewerPose` appends a `right` view
+    with the mono pose and a projection pushed far below the viewport (P[9] = 1e4). It rasterises nothing and
+    leaves three's union frustum unchanged (it reads only P[0], P[8] of that view). After those ~3 frames mono is
+    a true single view.
+  - Layer size is set by the mode at layer creation. Starting in mono, stereo eyes render at full-framebuffer
+    size and are scaled into the eye rects (about 2x the mono pixel cost, ~3.3x per eye what the rects need).
+    three sizes its XR render targets once per session, so this cannot change without re-entering.
 - Hit test: `PlaneEnvironment` implements IWER's SEM interface, so `requestHitTestSource` and
   `getHitTestResults` run in-frame against the latest `onPlanes` set with zero IPC. Native raycast is
   available as `__holoweb.hitTest(origin, dir)`, which costs one message round trip (about 1 frame).

@@ -113,8 +113,6 @@ export class HoloWebBridge {
   frameCount = 0;
   /** Set by session hooks; called when native ends the session. */
   onNativeSessionEnded: ((reason?: string) => void) | null = null;
-  /** Set by session hooks; called when the render mode (and so the view count) changes. */
-  onModeChange: ((mode: RenderMode) => void) | null = null;
   /** Called with every onPlanes set (local-floor tracking). */
   readonly planeListeners = new Set<(planes: readonly NativePlaneData[]) => void>();
   /** Receives onAnchors updates (NativeAnchors). */
@@ -274,10 +272,8 @@ export class HoloWebBridge {
   }
 
   private setLocalMode(mode: RenderMode): void {
-    const changed = mode !== this.mode;
     this.mode = mode;
     this.device.stereoEnabled = mode === 'stereo';
-    if (changed) this.onModeChange?.(mode);
   }
 
   setIpd(ipd: number): void {

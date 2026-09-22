@@ -245,3 +245,39 @@ Open (polyfill): re-post `ready` on `pageshow` with persisted=true (bfcache rest
 - three-ar mono (WebGL) and three-ar-webgpu stereo: 60 XR fps, no errors, light estimate reaches the page (native ~930-1050 lux / ~5000-5060 K -> sh0 ~1.8-2.0, primary tint warm-white).
 - Web/xr-anchor-check.html (WebXR Anchors API through polyfill + ARKit): createAnchor resolved in 2.0 ms, tracked at z = -1.000 for 4 s, delete() -> trackedAnchors 0, session ended cleanly.
 - Needs a person with the phone: prediction horizon tuning in HoloKit (`__holoweb.setPrediction(ms)`, default 25 ms), light estimate appearance in real rooms, rotating the phone mid-session in mono, tap-to-place on a real floor.
+
+## Polyfill execution log (mid-session mono/stereo toggle on WebGPU)
+
+2026-09-22. Scope: `polyfill/` only; not committed; `Scripts/sync-polyfill.sh` not run.
+
+### Root cause (three.js r186, WebGPU backend)
+- `WebGPUBackend._getRenderPassDescriptor` caches descriptors per `getCacheKey(renderContext)` = (activeCubeFace, mip level, texture ids). For an ArrayCamera on a depth-array target it builds one colour attachment per camera, `cameras.length` at first use.
+- XR renders into the renderer's intermediate framebuffer target, which always exists by default (output colour space != working space). That target is not external, so its descriptor stays cached for the whole session.
+- Starting in mono caches a 1-attachment descriptor. At the first stereo frame `_createArrayCameraLayerDescriptors` reads `colorAttachments[1].view` (TypeError). Reproduced headless with the old end-session policy disabled.
+- A descriptor first built for 2 cameras serves both 1 and 2 cameras (2 -> 1 -> 2 was fine).
+- `_getRenderPassDescriptor` only invalidates on target width/height/samples changes, none of which the polyfill can influence.
+- The proper fix is upstream: include the ArrayCamera size in the cache key.
+
+### Change
+- Sessions are no longer ended on a mode change (removed from `session.ts` / `bridge.ts`).
+- `gpu-binding.ts` primes three's cache:
+  - In a mono session with an XRGPUBinding layer, `getViewerPose` appends a `right` "priming" view until the page has rendered two views into the layer for 3 frames (`PRIME_FRAMES`).
+  - The priming view has the mono pose (ipd 0, so three's `setProjectionFromUnion` gives the mono frustum) and the mono projection with P[9] = 1e4. Every vertex in front lands at y_ndc ~ -1e4, so it rasterises nothing: the cost is one extra vertex/draw submission pass for ~3 frames.
+  - After priming, mono is a true single view.
+- The presenter skips views of the other mode (the priming view in mono).
+- Evaluated and rejected: keeping 2 views in mono permanently (idea from the task). It doubles three's per-draw CPU encoding and vertex work for the whole session, and exposes a fake second eye to pages all the time.
+- Cost note: the layer size is fixed at creation (three sizes its XR targets once). Starting in mono (the normal flow), stereo eyes render at full-framebuffer size and are scaled into the HoloKit rects, about 2x the mono pixel cost.
+- `examples/demo.html`: documents the normal flow (Start AR in mono, then the native toggle). `?mode=stereo` and `?autostart` are marked as test aids for unattended runs.
+
+### Verification
+- `npm run typecheck` clean. `npm run build`: 154.7 KB (48.1 KB gzip).
+- `npm test`: 51/51. New `test/gpu-priming.test.ts` with fake WebGPU checks three things:
+  - Priming for the first frames, then one view.
+  - The actual priming view: same transform; P[0], P[5], P[8], P[10], P[11], P[14] unchanged; y_ndc < -1000 for points in front.
+  - The presenter copies only layer 0 in mono; a stereo toggle then mono follow without ending the session.
+- `npm run test:e2e`: 10/10.
+  - New: three-ar.html (WebGL) and three-ar-webgpu.html (WebGPU) toggled mono -> stereo -> mono -> stereo mid-session. Each phase waits > 20 XR frames and asserts the view count (phases `mono:1 stereo:2 mono:1 stereo:2` on both), no console errors or GPU warnings, and that the session is still active.
+  - New: demo.html `?autostart` with the same toggles, sampled through the page's own XR session (`mono:1 stereo:2 mono:1 stereo:2`, presenter active).
+  - Removed: the obsolete "WebGPU session ends and re-enters" case and the single WebGL switch cases (covered by the toggle cases).
+  - Headless fps per phase over 1.5 s: WebGPU 60/60/60/60/60, WebGL 58-60, no hitch visible at the switches.
+- Not run on a device.

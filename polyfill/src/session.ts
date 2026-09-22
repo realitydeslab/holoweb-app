@@ -10,9 +10,8 @@
  *   canvases and the dom-overlay root, and html/body backgrounds are transparent so the native
  *   camera view (mono) or black (stereo) shows through.
  * - dom-overlay: the overlay root is raised above IWER's canvas container.
- * - A mono <-> stereo switch changes the view count (1 <-> 2). WebGL pages follow it, but
- *   three.js' WebGPU backend builds its per-view render passes once per session, so sessions
- *   rendering through XRGPUBinding are ended and the page can enter again in the new mode.
+ * - Native may switch mono <-> stereo at any time (view count 1 <-> 2); sessions keep running.
+ *   WebGL pages follow directly; XRGPUBinding sessions rely on the priming view in gpu-binding.ts.
  */
 import { mat4 } from 'gl-matrix';
 import { P_DEVICE, P_SPACE, XRDevice, XRReferenceSpace, XRSession, XRSystem } from 'iwer';
@@ -21,7 +20,6 @@ import type { NativeAnchors } from './anchors.js';
 import type { HoloWebBridge } from './bridge.js';
 import { addFrameEndListener } from './device.js';
 import { FloorTracker } from './floor.js';
-import { XRGPUProjectionLayer } from './gpu-binding.js';
 import type { ScreenInput } from './input.js';
 
 const OVERLAY_Z_INDEX = '1000';
@@ -120,11 +118,6 @@ export function installSessionHooks(
     bridge.planeListeners.add(onPlanes);
     input.attach(session, overlayRoot ?? null);
 
-    bridge.onModeChange = (newMode) => {
-      if (!session.renderState.layers.some((l) => l instanceof XRGPUProjectionLayer)) return;
-      console.warn(`HoloWeb: ending WebGPU XR session, render mode changed to ${newMode}`);
-      session.end().catch(() => undefined);
-    };
     bridge.onNativeSessionEnded = () => {
       endedByNative = true;
       session.end().catch(() => undefined);
@@ -139,7 +132,6 @@ export function installSessionHooks(
         bridge.planeListeners.delete(onPlanes);
         anchors.clear();
         bridge.onNativeSessionEnded = null;
-        bridge.onModeChange = null;
         if (!endedByNative) bridge.endNativeSession().catch((e) => console.warn('HoloWeb endSession', e));
       },
       { once: true },

@@ -22,7 +22,10 @@
     <button id="start">Start AR</button>
     <script type="module">
       // Showcase scene: content appears ~1 m in front of the viewer at session start, no surface needed.
-      // ?autostart enters AR immediately; ?mode=stereo asks native for HoloKit stereo first.
+      // Normal flow: tap "Start AR" (handheld mono), then use the app's native top-right button to switch
+      // mono <-> HoloKit stereo at any time; the XR session keeps running and the polyfill follows the mode.
+      // Test aids only: ?autostart enters AR without a tap; ?mode=stereo asks native for stereo before the
+      // session starts (unattended device runs), which is not how users reach stereo.
       import * as THREE from 'three/webgpu';
 
       const params = new URLSearchParams(location.search);

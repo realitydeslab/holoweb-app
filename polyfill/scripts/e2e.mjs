@@ -37,10 +37,10 @@ const cases = [
   { page: 'three-ar.html', mode: 'stereo', backend: 'webgl', views: 2 },
   { page: 'three-ar-webgpu.html', mode: 'mono', backend: 'webgpu', views: 1, path: 'copy' },
   { page: 'three-ar-webgpu.html', mode: 'stereo', backend: 'webgpu', views: 2, path: 'copy' },
-  { page: 'three-ar.html', mode: 'mono', switchTo: 'stereo', backend: 'webgl', views: 2 },
-  { page: 'three-ar.html', mode: 'stereo', switchTo: 'mono', backend: 'webgl', views: 1 },
-  // WebGPU sessions end on a view-count change; the page enters again in stereo
-  { page: 'three-ar-webgpu.html', mode: 'mono', switchTo: 'stereo', reenter: true, backend: 'webgpu', views: 2 },
+  // native toggle mid-session (Start AR in mono, then the top-right button): session keeps running,
+  // the view count follows the mode after every switch
+  { page: 'three-ar.html', mode: 'mono', toggle: ['stereo', 'mono', 'stereo'], backend: 'webgl', views: 2 },
+  { page: 'three-ar-webgpu.html', mode: 'mono', toggle: ['stereo', 'mono', 'stereo'], backend: 'webgpu', views: 2 },
   // eye rects change size under an existing layer (late device info): presenter's scaling blit
   { page: 'three-ar-webgpu.html', mode: 'stereo', lateModel: 'iPhone14,2', backend: 'webgpu', views: 2, path: 'blit' },
   // rotation to portrait mid-session: fixed-size targets, presentation rescales (reticle must stay centred)
@@ -68,20 +68,25 @@ for (const c of cases) {
     await route.fulfill({ body, contentType: 'text/javascript' });
   });
 
-  const label = `${c.page} [${c.mode}${c.switchTo ? ` -> ${c.switchTo}` : ''}${c.reenter ? ', re-enter' : ''}${c.lateModel ? `, late model ${c.lateModel}` : ''}${c.rotate ? ', rotate' : ''}]`;
+  const label = `${c.page} [${[c.mode, ...(c.toggle ?? [])].join(' -> ')}${c.lateModel ? `, late model ${c.lateModel}` : ''}${c.rotate ? ', rotate' : ''}]`;
   try {
     await page.goto(`${base}/examples/${c.page}?holoweb-mode=${c.mode}`);
     const gpu = await page.evaluate(async () => Boolean(await navigator.gpu?.requestAdapter()));
     await page.locator('#ARButton', { hasText: 'START AR' }).click({ timeout: 10000 });
     await page.waitForFunction(() => window.__arStatus.hitFrames > 10, null, { timeout: 10000 });
-    if (c.switchTo) {
-      await page.evaluate((m) => window.__holoweb.setMode(m), c.switchTo);
-      if (c.reenter) {
-        await page.locator('#ARButton', { hasText: 'START AR' }).click({ timeout: 5000 });
-        await page.waitForFunction(() => window.__arStatus.hitFrames > 80, null, { timeout: 10000 });
+    if (c.toggle) {
+      const phases = [];
+      for (const mode of ['mono', ...c.toggle]) {
+        if (mode !== 'mono' || phases.length) await page.evaluate((m) => window.__holoweb.setMode(m), mode);
+        const at = await page.evaluate(() => window.__arStatus.xrFrames);
+        await page.waitForFunction((n) => window.__arStatus.xrFrames > n + 20, at, { timeout: 5000 });
+        const views = await page.evaluate(() => window.__arStatus.views);
+        phases.push(`${mode}:${views}`);
+        if (views !== (mode === 'stereo' ? 2 : 1)) problems.push(`after switching to ${mode}: ${views} views`);
       }
-      const at = await page.evaluate(() => window.__arStatus.xrFrames);
-      await page.waitForFunction((n) => window.__arStatus.xrFrames > n + 10, at, { timeout: 5000 });
+      const active = await page.evaluate(() => Boolean(window.__holoweb.bridge.latest) && document.documentElement.classList.contains('holoweb-immersive'));
+      if (!active) problems.push('session did not survive the toggles');
+      console.log(`    phases ${phases.join(' ')}`);
     }
     if (c.rotate) {
       await page.setViewportSize({ width: 390, height: 844 });
@@ -104,7 +109,7 @@ for (const c of cases) {
     const path = await page.evaluate(() => document.querySelector('[data-holoweb=xr-gpu-presenter]')?.dataset.path ?? 'none');
     if (c.path && path !== c.path) problems.push(`presenter path ${path}, expected ${c.path}`);
     const png = await page.screenshot();
-    const shot = `${c.page.replace('.html', '')}-${c.mode}${c.switchTo ? `-to-${c.switchTo}` : ''}${c.lateModel ? '-late-model' : ''}${c.rotate ? '-rotated' : ''}.png`;
+    const shot = `${c.page.replace('.html', '')}-${c.mode}${c.toggle ? '-toggled' : ''}${c.lateModel ? '-late-model' : ''}${c.rotate ? '-rotated' : ''}.png`;
     await writeFile(join(shotDir, shot), png);
     const reticle = await page.evaluate(async (b64) => {
       const img = new Image();
@@ -149,6 +154,65 @@ for (const c of cases) {
   }
   for (const p of problems) console.log(`    ${p}`);
   if (problems.length) failures++;
+  await context.close();
+}
+
+// examples/demo.html (the device showcase, WebGPURenderer): autostart in mono, then toggle like the
+// native button. Frames and view counts are sampled through the page's own XR session.
+{
+  const context = await browser.newContext({ viewport: { width: 844, height: 390 }, deviceScaleFactor: 2 });
+  const page = await context.newPage();
+  const problems = [];
+  page.on('console', (m) => {
+    if (m.type() === 'error') problems.push(`console.error: ${m.text()}`);
+    if (m.type() === 'warning' && /WebGL|GL_|WebGPU|GPU/.test(m.text())) problems.push(`gpu warning: ${m.text()}`);
+  });
+  page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
+  await page.route(CDN, async (route) => {
+    const file = route.request().url().match(CDN)[1];
+    await route.fulfill({ body: await readFile(join(root, 'node_modules/three', file)), contentType: 'text/javascript' });
+  });
+  const sample = () =>
+    page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          const session = window.__holoweb.bridge.device.activeSession;
+          if (!session) return resolve({ frames: 0, views: 0 });
+          let frames = 0;
+          let views = 0;
+          session.requestReferenceSpace('local').then((local) => {
+            const tick = (_t, frame) => {
+              frames++;
+              views = frame.getViewerPose(local)?.views.length ?? 0;
+              if (frames < 20) session.requestAnimationFrame(tick);
+              else resolve({ frames, views });
+            };
+            session.requestAnimationFrame(tick);
+          });
+        }),
+    );
+  const phases = [];
+  try {
+    await page.goto(`${base}/examples/demo.html?autostart`);
+    await page.waitForFunction(() => Boolean(window.__holoweb?.bridge.device.activeSession), null, { timeout: 10000 });
+    for (const mode of ['mono', 'stereo', 'mono', 'stereo']) {
+      if (phases.length) await page.evaluate((m) => window.__holoweb.setMode(m), mode);
+      const { frames, views } = await sample();
+      phases.push(`${mode}:${views}`);
+      if (frames < 20) problems.push(`${mode}: XR loop stalled (${frames} frames)`);
+      if (views !== (mode === 'stereo' ? 2 : 1)) problems.push(`${mode}: ${views} views`);
+    }
+    const presenter = await page.evaluate(() => document.querySelector('[data-holoweb=xr-gpu-presenter]')?.dataset.path ?? 'none');
+    if (presenter === 'none') problems.push('WebGPU presenter never ran');
+    await writeFile(join(shotDir, 'demo-toggled.png'), await page.screenshot());
+    console.log(`${problems.length ? 'FAIL' : 'PASS'} demo.html [autostart mono -> stereo -> mono -> stereo]: phases ${phases.join(' ')} presenter=${presenter}`);
+  } catch (err) {
+    problems.push(String(err.message ?? err).split('\n')[0]);
+    console.log('FAIL demo.html');
+  }
+  for (const p of problems) console.log(`    ${p}`);
+  if (problems.length) failures++;
+  cases.push({ page: 'demo.html' });
   await context.close();
 }
 
