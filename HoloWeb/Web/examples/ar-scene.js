@@ -158,7 +158,9 @@ export function runARScene({ renderer, sessionInit }) {
     setInterval(() => {
       const latest = globalThis.__holoweb?.bridge?.latest;
       console.log('[ar-scene] ' + JSON.stringify({
-        xrFps: (status.xrFrames - lastFrames) / 2, views: status.views, backend: status.backend,
+        xrFps: (status.xrFrames - lastFrames) / 2, views: status.views,
+        // views that actually draw: an inert, zero-viewport view may remain after stereo -> mono
+        activeViews: renderer.xr.isPresenting ? renderer.xr.getCamera().cameras.filter((c) => c.viewport && c.viewport.z > 0 && c.viewport.w > 0).length : 0, backend: status.backend,
         hitFrames: status.hitFrames, features: status.sessionFeatures,
         latencyMs: latest?.latencyMs, mode: latest?.mode, tracking: latest?.tracking,
         anchors: status.anchors, placed: status.placed, light: status.light,

@@ -16,7 +16,8 @@ npm install          # also applies patches/iwer+2.4.0.patch (postinstall: patch
 npm run build        # dist/*.js, fails if > 250 KB or if IWER remote/native code is bundled
 npm test             # vitest: stereo golden values, bridge + session behaviour (happy-dom)
 npm run typecheck    # tsc --noEmit, strict
-npm run test:e2e     # headless Chromium against mock-native: examples in mono/stereo, native toggles, rotation, demo.html
+npm run test:e2e     # headless Chromium against mock-native: examples in mono/stereo, native toggles, rotation,
+                     # demo.html, stale-right-eye fixture on three r111 (HOLOWEB_E2E_TOJI=1 adds the live Toji page)
 ```
 
 Desktop development: open `examples/three-ar.html` (WebGL2 backend) or
@@ -33,6 +34,7 @@ and `?holoweb-model=iPhone17,1` override the mock.
 | `src/bridge.ts` | Protocol v1: `ready` handshake with `WKJSHandle`, `onFrame` -> device pose/projection/viewports, `rendered`, commands |
 | `src/session.ts` | `requestSession`/`endSession` to native, `local`/`local-floor` spaces, dom-overlay |
 | `src/stereo.ts`, `src/phones.ts` | HoloKit X math and the iOS phone table (from the Unity SDK) |
+| `src/views.ts` | View-count policy: never fewer views than the page has seen in a session (inert 2nd view) |
 | `src/prediction.ts` | Stereo-only pose extrapolation (default 25 ms, `__holoweb.setPrediction(ms)`, 0 = off) |
 | `src/anchors.ts` | `createAnchor` / `deleteAnchor` / `onAnchors` behind IWER's `XRAnchor` |
 | `src/light.ts` | `requestLightProbe` / `getLightEstimate` from ARKit ambient lux + kelvin |
@@ -74,6 +76,8 @@ at build time (IWER only uses it for `installRuntime({ polyfillLayers: true })`)
 7. **`XRRay.matrix` fix**: upstream built the rotation axis as `direction x -Z`, which points non-default
    rays the wrong way (for example a straight-down ray becomes straight up). Changed to `-Z x direction`.
 8. Types: `WebXRFeature` gains `'light-estimation' | 'webgpu'`.
+9. **Full-framebuffer clear**: the per-frame immersive clear disables a page-left `SCISSOR_TEST` for the clear, so
+   a former right-eye region cannot survive a stereo -> mono switch.
 
 Requirement 3 of the task (installRuntime without native `navigator.xr`, `immersive-ar` support,
 optional features and `enabledFeatures` echo including `webgpu`) needed no patch: it follows from
@@ -108,16 +112,21 @@ the device config. The config sets `userAgent` to the real UA, because IWER over
   layer. Native's projection already matches the new aspect, so geometry is correct; only the sampling density
   changes until the page re-enters XR.
 - Mono <-> stereo mid-session (normal flow: Start AR in mono, then the app's native toggle button): the
-  session keeps running and the view count follows the mode (1 <-> 2) on both backends.
+  session keeps running on both backends. Within a session the reported view count never drops below the
+  maximum the page has seen (`src/views.ts`): a session that has only been mono has one view; mono after stereo
+  reports `[mono view, inert right view]`. The inert view has the mono pose (three's union frustum = mono), a
+  zero-area WebGL viewport and a projection pushed far below the viewport (P[9] = 1e4), so it rasterises nothing
+  in any engine; presenters ignore it. Reason: engines keep per-view state sized by the largest view count.
+  three.js <= r111 WebXRManager renders a fixed `[cameraL, cameraR]` ArrayCamera and updates only `cameras[i]`
+  for `i < views.length`, so a 2 -> 1 drop left the stale right eye rendering every frame
+  (toji.github.io/webxr-particles, r111dev). Babylon / A-Frame / PlayCanvas may assume the same.
   - WebGL: follows directly (viewports + projections per frame).
   - WebGPU (`XRGPUBinding`): three.js r186 caches its intermediate target's render-pass descriptor under a
     key without the ArrayCamera size and builds one colour attachment per camera on first use, so a
     descriptor first built for 1 camera crashes at the switch to 2 (`_createArrayCameraLayerDescriptors`,
     `colorAttachments[1]` undefined), while one built for 2 cameras serves both. The polyfill therefore primes
-    it: in mono, until the page has rendered two views for 3 frames, `getViewerPose` appends a `right` view
-    with the mono pose and a projection pushed far below the viewport (P[9] = 1e4). It rasterises nothing and
-    leaves three's union frustum unchanged (it reads only P[0], P[8] of that view). After those ~3 frames mono is
-    a true single view.
+    it with the same inert view for the first 3 frames of a mono XRGPUBinding session; a session that stays
+    mono is a true single view after that.
   - Layer size is set by the mode at layer creation. Starting in mono, stereo eyes render at full-framebuffer
     size and are scaled into the eye rects (about 2x the mono pixel cost, ~3.3x per eye what the rects need).
     three sizes its XR render targets once per session, so this cannot change without re-entering.

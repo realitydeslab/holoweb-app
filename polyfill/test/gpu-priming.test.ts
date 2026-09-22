@@ -44,6 +44,7 @@ let session: Session;
 let binding: { createProjectionLayer(i: object): unknown; getViewSubImage(l: unknown, v: View): unknown };
 let layer: unknown;
 let primed: View[] = [];
+let lastViewports: { width: number; height: number }[] = [];
 
 const pose = mat4.fromTranslation(mat4.create(), [0, 1.5, 0]);
 const proj = mat4.perspective(mat4.create(), 1, 0.5, 0.01, 1000);
@@ -56,7 +57,7 @@ const frame = (local: unknown) =>
     session.requestAnimationFrame((_t, f) => {
       const views = f.getViewerPose(local).views;
       if (views.length === 2 && primed.length === 0) primed = [...views];
-      views.forEach((v) => binding.getViewSubImage(layer, v));
+      lastViewports = views.map((v) => (binding.getViewSubImage(layer, v) as { viewport: { width: number; height: number } }).viewport);
       resolve(views.map((v) => v.eye));
     }),
   );
@@ -116,8 +117,11 @@ describe('XRGPUBinding mono <-> stereo mid-session', () => {
 
     push('mono');
     copies.length = 0;
-    expect(await frame(local)).toEqual(['none']); // primed already: no extra view
+    // the page has seen 2 views: keep the inert 2nd view (views.ts), but present only the mono view
+    expect(await frame(local)).toEqual(['none', 'right']);
     expect(copies.map((c) => c.layer)).toEqual([0]);
+    expect(lastViewports[0].width * lastViewports[0].height).toBeGreaterThan(0);
+    expect([lastViewports[1].width, lastViewports[1].height]).toEqual([0, 0]); // inert view: 0x0 sub-image
     await session.end();
   });
 });

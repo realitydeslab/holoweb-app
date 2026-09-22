@@ -208,7 +208,7 @@ index 80a3bc7..eb95e38 100644
  //# sourceMappingURL=XRRenderState.js.map
 \ No newline at end of file
 diff --git a/node_modules/iwer/lib/session/XRSession.js b/node_modules/iwer/lib/session/XRSession.js
-index de7bbb7..9ff7074 100644
+index de7bbb7..65ca617 100644
 --- a/node_modules/iwer/lib/session/XRSession.js
 +++ b/node_modules/iwer/lib/session/XRSession.js
 @@ -20,6 +20,18 @@ import { XREye } from '../views/XRView.js';
@@ -249,7 +249,7 @@ index de7bbb7..9ff7074 100644
                  /**
                   * This code snippet is designed to clear the buffers attached to an opaque framebuffer
                   * at the beginning of each XR animation frame, but it only applies to immersive XR sessions.
-@@ -118,7 +134,7 @@ export class XRSession extends EventTarget {
+@@ -118,16 +134,23 @@ export class XRSession extends EventTarget {
                   * prevent rendering artifacts from past frames. It ensures that each new frame starts
                   * with a clean slate.
                   */
@@ -258,7 +258,23 @@ index de7bbb7..9ff7074 100644
                      const currentClearColor = context.getParameter(context.COLOR_CLEAR_VALUE);
                      const currentClearDepth = context.getParameter(context.DEPTH_CLEAR_VALUE);
                      const currentClearStencil = context.getParameter(context.STENCIL_CLEAR_VALUE);
-@@ -140,11 +156,20 @@ export class XRSession extends EventTarget {
++                    // HOLOWEB: clear the whole framebuffer even if the page left a per-eye scissor enabled
++                    // (otherwise a former right-eye region survives a stereo -> mono switch)
++                    const scissorTest = context.isEnabled(context.SCISSOR_TEST);
++                    if (scissorTest)
++                        context.disable(context.SCISSOR_TEST);
+                     context.clearColor(0.0, 0.0, 0.0, 0.0);
+                     context.clearDepth(1);
+                     context.clearStencil(0.0);
+                     context.clear(context.DEPTH_BUFFER_BIT |
+                         context.COLOR_BUFFER_BIT |
+                         context.STENCIL_BUFFER_BIT);
++                    if (scissorTest)
++                        context.enable(context.SCISSOR_TEST);
+                     context.clearColor(currentClearColor[0], currentClearColor[1], currentClearColor[2], currentClearColor[3]);
+                     context.clearDepth(currentClearDepth);
+                     context.clearStencil(currentClearStencil);
+@@ -140,11 +163,20 @@ export class XRSession extends EventTarget {
                          height;
                      mat4.perspective(this[P_SESSION].projectionMatrices[XREye.Left], this[P_SESSION].device.fovy, aspect, depthNear, depthFar);
                      mat4.copy(this[P_SESSION].projectionMatrices[XREye.Right], this[P_SESSION].projectionMatrices[XREye.Left]);
@@ -279,7 +295,7 @@ index de7bbb7..9ff7074 100644
                  const now = performance.now();
                  const frame = new XRFrame(this, this[P_SESSION].frameHandle, true, true, now);
                  const devui = this[P_SESSION].device[P_DEVICE].devui;
-@@ -198,6 +223,16 @@ export class XRSession extends EventTarget {
+@@ -198,6 +230,16 @@ export class XRSession extends EventTarget {
                      }
                  }
                  this[P_SESSION].currentFrameCallbacks = null;
@@ -296,7 +312,7 @@ index de7bbb7..9ff7074 100644
                  // - Set frame’s active boolean to false.
                  frame[P_FRAME].active = false;
                  this[P_SESSION].activeFrame = null;
-@@ -468,11 +503,16 @@ export class XRSession extends EventTarget {
+@@ -468,11 +510,16 @@ export class XRSession extends EventTarget {
          if (state.baseLayer && state.baseLayer[P_WEBGL_LAYER].session !== this) {
              throw new DOMException('Base layer was created by a different XRSession', 'InvalidStateError');
          }

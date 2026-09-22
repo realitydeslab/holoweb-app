@@ -37,8 +37,9 @@ Minimum OS: iOS 27.0. Transport uses `WKJSHandle` (iOS 27) so native calls into 
 - `sentAt`: native wall-clock send time, epoch ms (diagnostics: page computes one-way latency as `performance.timeOrigin + performance.now() - sentAt`)
 - `orientation`: "portrait" | "portraitUpsideDown" | "landscapeLeft" | "landscapeRight" (interface orientation used for view/proj)
 
-`bridge.onPlanes(planes)` at most 10 Hz when the plane set changed: `[{ id, transform: number[16], extent: [w, h], orientation: "horizontal" | "vertical" }]`.
+`bridge.onPlanes(planes)` at most 10 Hz when the plane set changed: `[{ id, transform: number[16], extent: [w, h], orientation: "horizontal" | "vertical", polygon: number[] (flat x,y,z triples in the plane's local space, y = 0, counter-clockwise seen from +Y, from ARPlaneAnchor.geometry.boundaryVertices, relative to the same `transform`), lastChanged: ms (ARFrame timestamp of the last update of this plane) }]`. Plane `transform` is the plane-centre pose with +Y = plane normal.
 `bridge.onAnchors(anchors)` at most 10 Hz when any app-created anchor moved: `[{ id, transform: number[16] }]`; an anchor ARKit removed is sent once with `transform: null`.
+`bridge.onEnvironment(env)` at most 1 Hz when ARKit's environment probe (AREnvironmentProbeAnchor, `environmentTexturing = .automatic`) changes: `{ size: 32, format: "rgba8", colorSpace: "srgb", faces: [px, nx, py, ny, pz, nz] (6 base64 strings of size*size*4 bytes, row 0 = top, WebGL/OpenGL cube-face order and orientation), timestamp: ms }`. The polyfill turns it into `XRWebGLBinding.getReflectionCubeMap(probe)` and fires `reflectionchange` on the light probe.
 `bridge.onSessionEnded(reason)` when native ends the session (interruption, background).
 
 ## Coordinate conventions

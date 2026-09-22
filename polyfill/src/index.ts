@@ -6,12 +6,13 @@
 import { NativeAnchors } from './anchors.js';
 import { HoloWebBridge, type NativeCallbacks } from './bridge.js';
 import { createHoloKitDevice } from './device.js';
-import { installGPUBinding } from './gpu-binding.js';
+import { installGPUBinding, needsPrimingView } from './gpu-binding.js';
 import { PlaneEnvironment } from './hittest.js';
 import { ScreenInput } from './input.js';
 import { createMockTransport } from './mock-native.js';
 import { installLightEstimation } from './light.js';
 import { installSessionHooks } from './session.js';
+import { installViewCountPolicy } from './views.js';
 import { installOpaqueFramebuffer } from './webgl-layer.js';
 import { getWebKit, nullTransport, webkitTransport, type Transport } from './webkit.js';
 
@@ -54,6 +55,7 @@ export function install(): HoloWebGlobal {
   installSessionHooks(device, bridge, input, anchors);
   installLightEstimation(() => bridge.latest?.light);
   installGPUBinding();
+  installViewCountPolicy(needsPrimingView);
   installOpaqueFramebuffer();
 
   const api: HoloWebGlobal = {

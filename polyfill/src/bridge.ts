@@ -12,6 +12,7 @@ import { nativeFramebufferSize, devicePixelRatioOrOne } from './device.js';
 import type { NativeAnchorData } from './anchors.js';
 import type { NativePlaneData, PlaneEnvironment } from './hittest.js';
 import { PosePredictor } from './prediction.js';
+import { INERT_VIEWPORT } from './views.js';
 import { lookupPhone, type PhoneLookup } from './phones.js';
 import { clampIpd, computeStereo, IPD_DEFAULT, type PixelRect, type StereoParams } from './stereo.js';
 import { isRecord, type Transport } from './webkit.js';
@@ -231,7 +232,8 @@ export class HoloWebBridge {
       delete device.nativeProjection.left;
       delete device.nativeProjection.right;
       delete device.nativeViewports.left;
-      delete device.nativeViewports.right;
+      // Only used by views.ts' inert 2nd view (mono after stereo): a true 0x0 viewport.
+      device.nativeViewports.right = { ...INERT_VIEWPORT };
     }
     // Keep the last good pose while ARKit has no tracking.
     if (!tracked) return;

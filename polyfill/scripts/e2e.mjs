@@ -7,6 +7,7 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { extname, join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { runStaleEyeChecks as staleEyeChecks } from './e2e-stale-eye.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const shotDir = process.env.HOLOWEB_E2E_SHOTS ?? join(root, 'test-results');
@@ -76,13 +77,17 @@ for (const c of cases) {
     await page.waitForFunction(() => window.__arStatus.hitFrames > 10, null, { timeout: 10000 });
     if (c.toggle) {
       const phases = [];
+      let seenStereo = false;
       for (const mode of ['mono', ...c.toggle]) {
         if (mode !== 'mono' || phases.length) await page.evaluate((m) => window.__holoweb.setMode(m), mode);
         const at = await page.evaluate(() => window.__arStatus.xrFrames);
         await page.waitForFunction((n) => window.__arStatus.xrFrames > n + 20, at, { timeout: 5000 });
-        const views = await page.evaluate(() => window.__arStatus.views);
-        phases.push(`${mode}:${views}`);
-        if (views !== (mode === 'stereo' ? 2 : 1)) problems.push(`after switching to ${mode}: ${views} views`);
+        const { views, activeViews } = await page.evaluate(() => window.__arStatus);
+        seenStereo ||= mode === 'stereo';
+        phases.push(`${mode}:${views}/${activeViews}`);
+        // the view count never drops within a session: mono after stereo keeps an inert 0x0 2nd view
+        if (views !== (seenStereo ? 2 : 1)) problems.push(`after switching to ${mode}: ${views} views`);
+        if (activeViews !== (mode === 'stereo' ? 2 : 1)) problems.push(`after switching to ${mode}: ${activeViews} active views`);
       }
       const active = await page.evaluate(() => Boolean(window.__holoweb.bridge.latest) && document.documentElement.classList.contains('holoweb-immersive'));
       if (!active) problems.push('session did not survive the toggles');
@@ -134,6 +139,7 @@ for (const c of cases) {
     const expectBackend = c.backend === 'webgpu' && !gpu ? 'webgl' : c.backend;
     if (status.backend !== expectBackend) problems.push(`backend ${status.backend}, expected ${expectBackend}`);
     if (status.views !== c.views) problems.push(`views ${status.views}, expected ${c.views}`);
+    if (!c.toggle && status.activeViews !== c.views) problems.push(`activeViews ${status.activeViews}, expected ${c.views}`);
     if (status.xrFrames < 30) problems.push(`only ${status.xrFrames} XR frames`);
     if (reticlePixels < 50) problems.push(`reticle not visible (${reticlePixels} px)`);
     if (c.rotate && (Math.abs(reticle.cx - 0.5) > 0.12 || Math.abs(reticle.cy - 0.5) > 0.12)) {
@@ -195,12 +201,14 @@ for (const c of cases) {
   try {
     await page.goto(`${base}/examples/demo.html?autostart`);
     await page.waitForFunction(() => Boolean(window.__holoweb?.bridge.device.activeSession), null, { timeout: 10000 });
+    let seenStereo = false;
     for (const mode of ['mono', 'stereo', 'mono', 'stereo']) {
       if (phases.length) await page.evaluate((m) => window.__holoweb.setMode(m), mode);
       const { frames, views } = await sample();
+      seenStereo ||= mode === 'stereo';
       phases.push(`${mode}:${views}`);
       if (frames < 20) problems.push(`${mode}: XR loop stalled (${frames} frames)`);
-      if (views !== (mode === 'stereo' ? 2 : 1)) problems.push(`${mode}: ${views} views`);
+      if (views !== (seenStereo ? 2 : 1)) problems.push(`${mode}: ${views} views`);
     }
     const presenter = await page.evaluate(() => document.querySelector('[data-holoweb=xr-gpu-presenter]')?.dataset.path ?? 'none');
     if (presenter === 'none') problems.push('WebGPU presenter never ran');
@@ -214,6 +222,12 @@ for (const c of cases) {
   if (problems.length) failures++;
   cases.push({ page: 'demo.html' });
   await context.close();
+}
+
+{
+  const r = await staleEyeChecks({ browser, base, root, shotDir });
+  failures += r.failures;
+  for (let i = 0; i < r.cases; i++) cases.push({ page: 'stale-eye' });
 }
 
 await browser.close();

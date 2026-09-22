@@ -17,12 +17,11 @@
  * the ArrayCamera size, and builds one colour attachment per camera on first use. A descriptor
  * first built with 1 camera crashes when a 2nd camera appears (_createArrayCameraLayerDescriptors
  * reads colorAttachments[1]); one built with 2 cameras serves 1 or 2. So a mono session primes it:
- * until the page has rendered two views for PRIME_FRAMES frames, getViewerPose appends a
- * priming 'right' view (same pose, projection shifted far below the viewport, so it rasterises
- * nothing and leaves three's union frustum unchanged). After that mono is a true single view.
+ * until the page has rendered two views for PRIME_FRAMES frames, views.ts appends its inert
+ * 'right' view. A session that stays mono is a true single view after that.
  */
-import { P_DEVICE, P_FRAME, P_SESSION, XRFrame, XRSession, XRView, XRViewerPose, XRViewport } from 'iwer';
-import { XREye } from 'iwer/lib/views/XRView.js';
+import { P_DEVICE, P_SESSION, XRSession, XRViewport } from 'iwer';
+import type { XRView } from 'iwer';
 import { addFrameEndListener, nativeFramebufferSize } from './device.js';
 import { GPUPresenter, type LayerBlit } from './gpu-presenter.js';
 import type { PixelRect } from './stereo.js';
@@ -31,8 +30,6 @@ type Eye = 'left' | 'right' | 'none';
 
 /** Frames with two rendered views after which three.js' descriptor cache is primed. */
 export const PRIME_FRAMES = 3;
-/** Vertical off-centre term of the priming view: every vertex in front lands at y_ndc ~ -1e4. */
-const PRIMING_OFFSET = 1e4;
 
 export interface XRGPUProjectionLayerInit {
   colorFormat: GPUTextureFormat;
@@ -177,7 +174,9 @@ export class XRGPUBinding {
     }
     const eye = view.eye as Eye;
     layer.usedEyes.add(eye);
-    const viewport = new XRViewport(0, 0, layer.textureWidth, layer.textureHeight);
+    // views.ts' inert 2nd view in mono gets a 0x0 viewport, like XRWebGLLayer.getViewport.
+    const inert = eye === 'right' && !this.session[P_SESSION].device.stereoEnabled;
+    const viewport = inert ? new XRViewport(0, 0, 0, 0) : new XRViewport(0, 0, layer.textureWidth, layer.textureHeight);
     return new XRGPUSubImage(layer.colorTexture, viewport, eye === 'right' ? 1 : 0, layer.colorFormat);
   }
 
@@ -205,25 +204,9 @@ export class XRGPUBinding {
   }
 }
 
-function needsPrimingView(session: XRSession): boolean {
+/** True while three.js' WebGPU descriptor cache may still hold a 1-view descriptor (views.ts). */
+export function needsPrimingView(session: XRSession): boolean {
   return session.renderState.layers.some((l) => l instanceof XRGPUProjectionLayer && l.twoViewFrames < PRIME_FRAMES);
-}
-
-function primingView(base: XRView, session: XRSession): XRView {
-  const projection = new Float32Array(base.projectionMatrix);
-  projection[9] = PRIMING_OFFSET;
-  return new XRView(XREye.Right, projection, base.transform, session);
-}
-
-function installPrimingView(): void {
-  const getViewerPose = XRFrame.prototype.getViewerPose;
-  XRFrame.prototype.getViewerPose = function (this: XRFrame, referenceSpace) {
-    const pose = getViewerPose.call(this, referenceSpace);
-    const session = this[P_FRAME].session;
-    if (!pose || pose.views.length !== 1 || !needsPrimingView(session)) return pose;
-    const views = [pose.views[0], primingView(pose.views[0], session)];
-    return new XRViewerPose(pose.transform, views, pose.emulatedPosition);
-  };
 }
 
 /** Install globalThis.XRGPUBinding (and the layer classes) if WebGPU is present. */
@@ -232,6 +215,5 @@ export function installGPUBinding(target: Record<string, unknown> = globalThis a
   target.XRGPUBinding = XRGPUBinding;
   target.XRGPUSubImage = XRGPUSubImage;
   target.XRProjectionLayer = XRGPUProjectionLayer;
-  installPrimingView();
   return true;
 }

@@ -341,3 +341,45 @@ describe('M7: anchors, light estimation, local-floor reset, stereo prediction', 
     await inline.end();
   });
 });
+
+describe('view-count policy (views.ts): never fewer views than the page has seen', () => {
+  interface PoseView { eye: string; projectionMatrix: Float32Array; transform: { matrix: Float32Array } }
+  const eyes = (sess: TestSession, local: unknown) =>
+    inFrame(sess, (f) => (f.getViewerPose(local)!.views as unknown as PoseView[]).map((v) => v));
+
+  it('keeps one view for a mono-only session, adds an inert right view after stereo', async () => {
+    const sess = await xr().requestSession('immersive-ar');
+    sess.updateRenderState({ layers: [{}] });
+    const local = await sess.requestReferenceSpace('local');
+    hw.onFrame(1, 'mono', Array.from(camPose), Array.from(camView), Array.from(arkitProj), null, 'normal');
+    await inFrame(sess);
+    expect((await eyes(sess, local)).map((v) => v.eye)).toEqual(['none']);
+
+    hw.onFrame(2, 'stereo', Array.from(camPose), Array.from(camView), Array.from(arkitProj), null, 'normal');
+    expect((await eyes(sess, local)).map((v) => v.eye)).toEqual(['left', 'right']);
+
+    hw.onFrame(3, 'mono', Array.from(camPose), Array.from(camView), Array.from(arkitProj), null, 'normal');
+    const [mono, inert] = await eyes(sess, local);
+    expect([mono.eye, inert.eye]).toEqual(['none', 'right']);
+    expect(Array.from(inert.transform.matrix)).toEqual(Array.from(mono.transform.matrix));
+    const p = inert.projectionMatrix;
+    for (const i of [0, 5, 8, 10, 11, 14]) expect(p[i]).toBe(mono.projectionMatrix[i]);
+    expect((p[5] * 1 + p[9] * -2) / 2).toBeLessThan(-1000); // nothing reaches the viewport
+    // the WebGL layer gives the inert view a zero-area viewport
+    const device = hw.bridge.device as unknown as { [k: symbol]: { getViewport: (l: unknown, v: unknown) => { width: number; height: number } } };
+    const pDevice = Object.getOwnPropertySymbols(device).find((s) => String(s).includes('xr-device'))!;
+    const vp = device[pDevice].getViewport({ context: { canvas: { width: 1000, height: 500 } } }, inert);
+    expect([vp.width, vp.height]).toEqual([0, 0]); // true 0x0, so pages that skip empty viewports skip it
+    await sess.end();
+  });
+
+  it('starts each session afresh', async () => {
+    const sess = await xr().requestSession('immersive-ar');
+    sess.updateRenderState({ layers: [{}] });
+    const local = await sess.requestReferenceSpace('local');
+    hw.onFrame(4, 'mono', Array.from(camPose), Array.from(camView), Array.from(arkitProj), null, 'normal');
+    await inFrame(sess);
+    expect((await eyes(sess, local)).map((v) => v.eye)).toEqual(['none']);
+    await sess.end();
+  });
+});

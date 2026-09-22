@@ -12,6 +12,8 @@ export function runARScene({ renderer, sessionInit }) {
     placed: 0,
     sessionFeatures: [],
     views: 0,
+    // views whose XRViewport has non-zero width and height (the runtime may report an extra 0x0 view)
+    activeViews: 0,
     anchors: 0,
     light: null,
     errors: [],
@@ -114,6 +116,8 @@ export function runARScene({ renderer, sessionInit }) {
       const session = renderer.xr.getSession();
       const pose = frame.getViewerPose(referenceSpace);
       status.views = pose ? pose.views.length : 0;
+      // three copies each view's XRViewport (getViewport / getViewSubImage) into its XR sub-cameras
+      status.activeViews = renderer.xr.getCamera().cameras.filter((c) => c.viewport && c.viewport.z > 0 && c.viewport.w > 0).length;
       if (!hitTestRequested) {
         session.requestReferenceSpace('viewer').then((viewer) =>
           session.requestHitTestSource({ space: viewer }).then((source) => (hitTestSource = source)),
@@ -158,7 +162,9 @@ export function runARScene({ renderer, sessionInit }) {
     setInterval(() => {
       const latest = globalThis.__holoweb?.bridge?.latest;
       console.log('[ar-scene] ' + JSON.stringify({
-        xrFps: (status.xrFrames - lastFrames) / 2, views: status.views, backend: status.backend,
+        xrFps: (status.xrFrames - lastFrames) / 2, views: status.views,
+        // views that actually draw: an inert, zero-viewport view may remain after stereo -> mono
+        activeViews: renderer.xr.isPresenting ? status.activeViews : 0, backend: status.backend,
         hitFrames: status.hitFrames, features: status.sessionFeatures,
         latencyMs: latest?.latencyMs, mode: latest?.mode, tracking: latest?.tracking,
         anchors: status.anchors, placed: status.placed, light: status.light,

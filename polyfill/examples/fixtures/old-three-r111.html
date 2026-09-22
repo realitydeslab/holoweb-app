@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <title>HoloWeb fixture: three.js r111 WebXR (fixed stereo ArrayCamera)</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+      #start { position: absolute; left: 10px; top: 10px; }
+    </style>
+    <!-- e2e fixture (not copied into the app). three r111's WebXRManager (same code as the r111dev
+         build on toji.github.io/webxr-particles) renders a fixed ArrayCamera [cameraL, cameraR] and
+         only updates cameras[i] for i < views.length. Backdrops: green on layer 1
+         (cameraL, i.e. the mono view) and red on layer 2 (cameraR only). Any red pixel in mono means
+         a stale right eye is being rendered. -->
+    <script src="../../dist/holoweb-polyfill.js"></script>
+  </head>
+  <body>
+    <button id="start">Start AR</button>
+    <script type="module">
+      import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.111.0/build/three.module.js';
+
+      const status = (window.__fixture = { revision: THREE.REVISION, xrFrames: 0, errors: [] });
+      addEventListener('error', (e) => status.errors.push(String(e.message)));
+      addEventListener('unhandledrejection', (e) => status.errors.push(String(e.reason)));
+
+      const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true });
+      renderer.setPixelRatio(devicePixelRatio);
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.vr.enabled = true;
+      renderer.vr.setReferenceSpaceType('local');
+      document.body.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.01, 50);
+      const backdrop = (color, layer) => {
+        const mesh = new THREE.Mesh(
+          new THREE.SphereBufferGeometry(10, 32, 16),
+          new THREE.MeshBasicMaterial({ color, side: THREE.BackSide }),
+        );
+        mesh.layers.set(layer);
+        scene.add(mesh);
+      };
+      backdrop(0x00ff00, 1); // left / mono camera
+      backdrop(0xff0000, 2); // right camera only
+
+      // r111 passes only `time` to this callback (no XRFrame), so count presenting frames
+      renderer.setAnimationLoop(() => {
+        if (renderer.vr.isPresenting()) status.xrFrames++;
+        renderer.render(scene, camera);
+      });
+
+      document.getElementById('start').addEventListener('click', async () => {
+        try {
+          const session = await navigator.xr.requestSession('immersive-ar');
+          renderer.vr.setSession(session);
+        } catch (e) {
+          status.errors.push('start: ' + e.message);
+        }
+      });
+    </script>
+  </body>
+</html>

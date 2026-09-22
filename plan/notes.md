@@ -281,3 +281,36 @@ Open (polyfill): re-post `ready` on `pageshow` with persisted=true (bfcache rest
   - Removed: the obsolete "WebGPU session ends and re-enters" case and the single WebGL switch cases (covered by the toggle cases).
   - Headless fps per phase over 1.5 s: WebGPU 60/60/60/60/60, WebGL 58-60, no hitch visible at the switches.
 - Not run on a device.
+
+## Polyfill execution log (stale right eye after stereo -> mono, old three.js)
+
+2026-09-22. Scope: `polyfill/` only; not committed; `Scripts/sync-polyfill.sh` not run.
+
+### Cause (confirmed from source)
+- toji.github.io/webxr-particles ships three.js `REVISION = '111dev'`.
+- Its `WebXRManager` builds `cameraVR = new ArrayCamera([cameraL, cameraR])` once. `onAnimationFrame` updates `cameraVR.cameras[i]` only for `i < views.length` and never shrinks the array.
+- After stereo -> mono, cameraR keeps its stereo viewport, pose and projection and is rendered every frame. three r110 does the same.
+- three r117 and later rebuild the camera list when the view count changes (checked in the 0.117.1 source), so the fixture pins 0.110.0.
+
+### Fix
+- New `src/views.ts` view-count policy: within a session the reported view count never drops below the maximum the page has seen.
+  - A mono-only session keeps one view.
+  - Mono after stereo reports `[mono 'none' view, inert 'right' view]`.
+  - The inert view has the mono pose (three's union frustum = mono), IWER's zero-width mono 'right' WebGL viewport, and the mono projection with P[9] = 1e4, so it rasterises nothing.
+  - The WebGPU presenter ignores it. For WebGL no presenter is involved: zero-area viewport plus no fragments.
+- The XRGPUBinding descriptor priming now uses the same inert view (`needsPrimingView` is the extra reason).
+- Trade-off: after any stereo trip, mono sessions pay one extra vertex/draw-submission pass per frame (no fragments) for the rest of the session.
+- IWER patch hunk 9: the per-frame immersive clear temporarily disables a page-left `SCISSOR_TEST`, so the whole framebuffer is cleared (including the old right-eye region). Patch is now 117 changed lines.
+
+### Verification
+- `npm test`: 53/53.
+  - New tests: a mono-only session keeps 1 view; stereo -> mono gives `none,right` with the inert view having the same transform, the same union-relevant projection terms, a zero-area WebGL viewport and no rasterisation; each new session starts afresh.
+  - The priming test was updated (mono after stereo keeps the inert view; the presenter still copies only layer 0).
+- `npm run test:e2e`: 12/12 with `HOLOWEB_E2E_TOJI=1` (11 without; the Toji case is opt-in because it needs the network).
+  - `examples/fixtures/old-three-r110.html` (three 0.110.0 via jsdelivr, served locally from `three-r110`; WebGLRenderer + `renderer.vr`): a green backdrop on layer 1 (cameraL / mono) and a red backdrop on layer 2 (cameraR only).
+    - Screenshot: mono red 0; stereo red 399,256 px in the right half; mono again red 0 with green covering the right half.
+    - Spy: `gl.viewport(877,39,698,572)` (the stereo right-eye rect) is called in stereo and never after returning to mono.
+  - Live https://toji.github.io/webxr-particles/ with the bundle injected at document start (as the app does) against mock-native, AR button, mono -> stereo -> mono: the right-eye rect is used in stereo and never in mono; 0 page console errors.
+  - Toggle cases now expect `mono:1 stereo:2 mono:2 stereo:2` (three-ar WebGL, three-ar-webgpu, demo.html).
+- Negative control: building with the policy disabled (priming only) made both toggle cases, the fixture and Toji fail. The fixture showed 55,796 stale red px in mono and the right-eye `gl.viewport` still called; Toji also still called the right-eye rect in mono. This is the device bug, reproduced headless. The policy was restored and the bundle rebuilt.
+- Build: 154.9 KB (48.1 KB gzip). Not run on a device.
