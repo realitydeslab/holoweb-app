@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <title>HoloWeb demo</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+      #start { position: absolute; inset: auto 0 12% 0; margin: auto; width: 220px; padding: 14px; font: 600 16px system-ui;
+               color: #fff; background: #0af; border: 0; border-radius: 12px; }
+    </style>
+    <script src="../dist/holoweb-polyfill.js"></script>
+    <script type="importmap">
+      { "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.webgpu.js",
+          "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.webgpu.js",
+          "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.tsl.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/" } }
+    </script>
+  </head>
+  <body>
+    <button id="start">Start AR</button>
+    <script type="module">
+      // Showcase scene: content appears ~1 m in front of the viewer at session start, no surface needed.
+      // ?autostart enters AR immediately; ?mode=stereo asks native for HoloKit stereo first.
+      import * as THREE from 'three/webgpu';
+
+      const params = new URLSearchParams(location.search);
+      const renderer = new THREE.WebGPURenderer({ antialias: true, alpha: true });
+      renderer.setPixelRatio(devicePixelRatio);
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.xr.enabled = true;
+      renderer.xr.setReferenceSpaceType('local');
+      document.body.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.01, 50);
+      scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 1.2));
+      const sun = new THREE.DirectionalLight(0xffffff, 2.5);
+      sun.position.set(1, 2, 1);
+      scene.add(sun);
+
+      // Everything hangs off one group that is placed in front of the viewer when AR starts.
+      const stage = new THREE.Group();
+      scene.add(stage);
+
+      const hero = new THREE.Mesh(
+        new THREE.TorusKnotGeometry(0.12, 0.04, 200, 24),
+        new THREE.MeshStandardMaterial({ color: 0x33ccff, metalness: 0.6, roughness: 0.2, emissive: 0x062033 }),
+      );
+      stage.add(hero);
+
+      const orbiters = [];
+      const colors = [0xff5577, 0xffcc33, 0x66ff99, 0xaa77ff, 0xff8844, 0x44ddff];
+      colors.forEach((color, i) => {
+        const geometry = i % 2 ? new THREE.IcosahedronGeometry(0.035, 0) : new THREE.BoxGeometry(0.05, 0.05, 0.05);
+        const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.2 }));
+        mesh.userData.phase = (i / colors.length) * Math.PI * 2;
+        stage.add(mesh);
+        orbiters.push(mesh);
+      });
+
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(0.3, 0.004, 8, 120),
+        new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 }),
+      );
+      ring.rotation.x = Math.PI / 2;
+      stage.add(ring);
+
+      // Floor grid 1.3 m below the start pose, so there is a sense of space around the content.
+      const grid = new THREE.GridHelper(4, 20, 0x33ccff, 0x336677);
+      grid.material.transparent = true;
+      grid.material.opacity = 0.35;
+      grid.position.y = -1.3;
+      scene.add(grid);
+
+      let placed = false;
+      renderer.xr.addEventListener('sessionstart', () => { placed = false; document.getElementById('start').style.display = 'none'; });
+      renderer.xr.addEventListener('sessionend', () => { document.getElementById('start').style.display = ''; });
+
+      const clock = new THREE.Clock();
+      const forward = new THREE.Vector3();
+      renderer.setAnimationLoop(() => {
+        const t = clock.getElapsedTime();
+        if (renderer.xr.isPresenting && !placed) {
+          const xrCamera = renderer.xr.getCamera();
+          xrCamera.getWorldDirection(forward);
+          forward.y = 0;
+          forward.normalize();
+          stage.position.copy(xrCamera.position).addScaledVector(forward, 1.0);
+          stage.position.y = xrCamera.position.y - 0.1;
+          grid.position.set(xrCamera.position.x, xrCamera.position.y - 1.3, xrCamera.position.z);
+          placed = true;
+        }
+        hero.rotation.x = t * 0.5;
+        hero.rotation.y = t * 0.8;
+        hero.position.y = Math.sin(t * 1.5) * 0.03;
+        orbiters.forEach((m) => {
+          const a = t * 0.9 + m.userData.phase;
+          m.position.set(Math.cos(a) * 0.3, Math.sin(a * 2) * 0.05, Math.sin(a) * 0.3);
+          m.rotation.x = m.rotation.y = t * 1.5;
+        });
+        renderer.render(scene, camera);
+      });
+
+      async function start() {
+        if (params.get('mode') === 'stereo') await globalThis.__holoweb?.setMode?.('stereo');
+        const session = await navigator.xr.requestSession('immersive-ar', { optionalFeatures: ['local', 'webgpu', 'light-estimation'] });
+        await renderer.xr.setSession(session);
+      }
+      document.getElementById('start').addEventListener('click', () => start().catch((e) => console.error('start failed: ' + e.message)));
+      if (params.has('autostart')) start().catch((e) => console.error('autostart failed: ' + e.message));
+
+      let last = 0, frames = 0;
+      renderer.xr.addEventListener('sessionstart', () => { frames = 0; });
+      setInterval(() => {
+        const views = renderer.xr.getCamera().cameras.length;
+        console.log(`[demo] presenting=${renderer.xr.isPresenting} views=${views} placed=${placed} backend=${renderer.backend.isWebGPUBackend ? 'webgpu' : 'webgl'}`);
+      }, 3000);
+    </script>
+  </body>
+</html>
