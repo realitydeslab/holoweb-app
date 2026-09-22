@@ -27,6 +27,10 @@ final class ARBridge: NSObject {
     private var framesInFlight = 0
     private static let maxFramesInFlight = 2
     private var planesDirty = false
+    /// Anchors the page created, keyed by ARAnchor identifier string.
+    private var pageAnchorIDs: Set<String> = []
+    private var removedAnchorIDs: Set<String> = []
+    private var anchorsDirty = false
     private var lastPlanesSent: TimeInterval = 0
     private(set) var framesPushed = 0
     private(set) var framesSkipped = 0
@@ -76,6 +80,11 @@ final class ARBridge: NSObject {
     private func resetPageState() {
         bridgeHandle = nil
         recentFrames.removeAll()
+        if let frame = session.currentFrame {
+            frame.anchors.filter { pageAnchorIDs.contains($0.identifier.uuidString) }.forEach(session.remove(anchor:))
+        }
+        pageAnchorIDs.removeAll()
+        removedAnchorIDs.removeAll()
         renderedTimestamp = nil
         pageReady = false
         streaming = false
@@ -129,6 +138,22 @@ extension ARBridge: WKScriptMessageHandlerWithReply {
             }
             state?.setMode(mode)
             replyHandler(["ok": true], nil)
+        case "createAnchor":
+            guard let pose = body["pose"] as? [Double], pose.count == 16 else {
+                replyHandler(nil, "pose must be 16 numbers")
+                return
+            }
+            let anchor = ARAnchor(name: "holoweb", transform: simd_float4x4(columnMajor: pose))
+            session.add(anchor: anchor)
+            pageAnchorIDs.insert(anchor.identifier.uuidString)
+            anchorsDirty = true
+            replyHandler(["id": anchor.identifier.uuidString], nil)
+        case "deleteAnchor":
+            if let id = body["id"] as? String, pageAnchorIDs.remove(id) != nil,
+               let anchor = session.currentFrame?.anchors.first(where: { $0.identifier.uuidString == id }) {
+                session.remove(anchor: anchor)
+            }
+            replyHandler(["ok": true], nil)
         case "rendered":
             renderedTimestamp = body["t"] as? Double
             replyHandler(nil, nil)
@@ -166,15 +191,29 @@ extension ARBridge: ARSessionDelegate {
     }
 
     nonisolated func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
-        MainActor.assumeIsolated { self.planesDirty = true }
+        MainActor.assumeIsolated { self.markAnchorsChanged(anchors, removed: false) }
     }
 
     nonisolated func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
-        MainActor.assumeIsolated { self.planesDirty = true }
+        MainActor.assumeIsolated { self.markAnchorsChanged(anchors, removed: false) }
     }
 
     nonisolated func session(_ session: ARSession, didRemove anchors: [ARAnchor]) {
-        MainActor.assumeIsolated { self.planesDirty = true }
+        MainActor.assumeIsolated { self.markAnchorsChanged(anchors, removed: true) }
+    }
+
+    private func markAnchorsChanged(_ anchors: [ARAnchor], removed: Bool) {
+        for anchor in anchors {
+            if anchor is ARPlaneAnchor {
+                planesDirty = true
+            } else if pageAnchorIDs.contains(anchor.identifier.uuidString) {
+                anchorsDirty = true
+                if removed {
+                    pageAnchorIDs.remove(anchor.identifier.uuidString)
+                    removedAnchorIDs.insert(anchor.identifier.uuidString)
+                }
+            }
+        }
     }
 
     private func push(_ frame: ARFrame) {
@@ -229,7 +268,17 @@ extension ARBridge: ARSessionDelegate {
     }
 
     private func pushPlanesIfNeeded(_ frame: ARFrame, now: TimeInterval) {
-        guard planesDirty, now - lastPlanesSent >= 0.1 else { return }
+        guard now - lastPlanesSent >= 0.1 else { return }
+        if anchorsDirty {
+            anchorsDirty = false
+            var anchors: [[String: Any]] = frame.anchors
+                .filter { pageAnchorIDs.contains($0.identifier.uuidString) }
+                .map { ["id": $0.identifier.uuidString, "transform": $0.transform.columnMajor] }
+            anchors += removedAnchorIDs.map { ["id": $0, "transform": NSNull()] }
+            removedAnchorIDs.removeAll()
+            call("onAnchors(anchors)", ["anchors": anchors])
+        }
+        guard planesDirty else { return }
         planesDirty = false
         lastPlanesSent = now
         let planes: [[String: Any]] = frame.anchors.compactMap { $0 as? ARPlaneAnchor }.map { plane in

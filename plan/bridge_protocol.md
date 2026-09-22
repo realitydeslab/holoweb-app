@@ -20,6 +20,8 @@ Minimum OS: iOS 27.0. Transport uses `WKJSHandle` (iOS 27) so native calls into 
 | `endSession` | `{}` | `{ ok }` — native stops pushing frames |
 | `hitTest` | `{ origin: [x,y,z], direction: [x,y,z] }` (world space, metres) | `{ hits: [{ pose: number[16], type: "plane" \| "estimated" }] }` |
 | `setMode` | `{ mode: "mono" \| "stereo" }` | `{ ok }` |
+| `createAnchor` | `{ pose: number[16] }` world pose, column-major | `{ id }` — native adds an `ARAnchor`; its tracked pose then arrives via `onAnchors` |
+| `deleteAnchor` | `{ id }` | `{ ok }` |
 | `rendered` | `{ t }` ARFrame timestamp (ms) of the pose used for the XR frame just drawn; send once per XR frame, do not await | `null` — native draws the matching camera image (mono) |
 | `log` | `{ level, message }` | `{ ok }` |
 
@@ -36,11 +38,12 @@ Minimum OS: iOS 27.0. Transport uses `WKJSHandle` (iOS 27) so native calls into 
 - `orientation`: "portrait" | "portraitUpsideDown" | "landscapeLeft" | "landscapeRight" (interface orientation used for view/proj)
 
 `bridge.onPlanes(planes)` at most 10 Hz when the plane set changed: `[{ id, transform: number[16], extent: [w, h], orientation: "horizontal" | "vertical" }]`.
+`bridge.onAnchors(anchors)` at most 10 Hz when any app-created anchor moved: `[{ id, transform: number[16] }]`; an anchor ARKit removed is sent once with `transform: null`.
 `bridge.onSessionEnded(reason)` when native ends the session (interruption, background).
 
 ## Coordinate conventions
 ARKit world == WebXR `local` reference space (right-handed, Y-up, metres, origin at session start). `viewer` = camera (mono) or centre-eye (stereo). `local-floor` = `local` translated down by the lowest horizontal plane, else 1.3 m.
 
 ## Stereo (HoloKit) responsibilities
-Native: locks landscapeLeft, draws black background, reports device model/screen metrics in `ready`.
+Native: locks UIInterfaceOrientation.landscapeRight (= Unity LandscapeLeft, home side on the right), draws black background, reports device model/screen metrics in `ready`.
 Polyfill: computes centre-eye pose = cameraPose * T(CameraOffset + MrOffset), per-eye offsets +-ipd/2, per-eye off-axis projection and pixel viewport rects from the HoloKit constants and phone table (see plan/notes.md "HoloKit stereo math").

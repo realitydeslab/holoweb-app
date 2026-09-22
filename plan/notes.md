@@ -179,3 +179,8 @@ three.js WebGPU-backend XR path needs only: `globalThis.XRGPUBinding` constructo
 
 - Bridge: ~20 frames skipped only in the first second (page startup), then 0. Delivery latency ~0-1 ms (small negative values are wall-clock jitter between processes).
 - Not yet verified (needs a person holding the phone): visual camera/content alignment in mono, hit-test reticle on a real floor (hitFrames stayed 0 because the phone was lying still with no planes), HoloKit X optical alignment in stereo.
+
+### M7 native: ARKit anchors (iPhone 15 Pro, iOS 27)
+- createAnchor adds an ARAnchor (name "holoweb") and replies with its id; tracked poses go to the page via onAnchors at <=10 Hz; removed anchors are sent once with transform null; deleteAnchor removes it. Page anchors are removed on navigation.
+- bridge-check: createAnchor 0.5 m in front of the camera -> onAnchors delivered within 400 ms with z = -0.500 (requested -0.500). onFrame stayed at 60.0/s.
+- Regression: default remote Unity WebGPU page (https://holoweb.app/test2/) still loads with the polyfill injected (Unity WebGPU 1.0 device, RenderGraph enabled), no errors.

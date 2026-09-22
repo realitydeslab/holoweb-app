@@ -10,6 +10,12 @@ extension simd_float4x4 {
         [columns.0, columns.1, columns.2, columns.3].flatMap { [Double($0.x), Double($0.y), Double($0.z), Double($0.w)] }
     }
 
+    init(columnMajor m: [Double]) {
+        let f = m.map(Float.init)
+        self.init(columns: (simd_float4(f[0], f[1], f[2], f[3]), simd_float4(f[4], f[5], f[6], f[7]),
+                            simd_float4(f[8], f[9], f[10], f[11]), simd_float4(f[12], f[13], f[14], f[15])))
+    }
+
     init(translation t: simd_float3) {
         self = matrix_identity_float4x4
         columns.3 = simd_float4(t.x, t.y, t.z, 1)

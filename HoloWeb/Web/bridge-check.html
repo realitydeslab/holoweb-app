@@ -9,13 +9,14 @@ const out = document.getElementById("out");
 const log = (...a) => { const s = a.join(" "); console.log("[bridge-check] " + s); out.textContent += s + "\n"; };
 const native = (msg) => window.webkit.messageHandlers.holoweb.postMessage(msg);
 
-let frames = 0, first = null, last = null, planes = 0, argsSeen = null, lat = [];
+let anchorUpdates = [], frames = 0, first = null, last = null, planes = 0, argsSeen = null, lat = [];
 const bridge = {
   onFrame(t, mode, transform, view, proj, light, tracking, orientation, sentAt) {
     frames++; if (sentAt) lat.push(performance.timeOrigin + performance.now() - sentAt); last = { t, transform, tracking, orientation, mode };
     if (!first) { first = last; argsSeen = { tIsNumber: typeof t === "number", transformLen: transform.length, projLen: proj.length, light, tracking, orientation, mode }; }
   },
   onPlanes(list) { planes = list.length; },
+  onAnchors(list) { anchorUpdates.push(list); },
   onSessionEnded(reason) { log("sessionEnded", reason); },
 };
 window.__holoweb = bridge;  // fallback target
@@ -51,6 +52,12 @@ window.__holoweb = bridge;  // fallback target
   log("hitTest round trip ms:", (performance.now() - h0).toFixed(1), "hits:", hit.hits.length, hit.hits[0] ? "type " + hit.hits[0].type + " at " + hit.hits[0].pose.slice(12, 15).map(v => v.toFixed(2)).join(",") : "");
   log("planes received:", planes);
 
+  const pose = last.transform.slice(); pose[14] -= 0.5;
+  const created = await native({ type: "createAnchor", pose });
+  await new Promise(r => setTimeout(r, 400));
+  const seen = anchorUpdates.flat().find(a => a.id === created.id);
+  log("createAnchor id:", created.id, "onAnchors delivered:", String(!!seen), seen && seen.transform ? "z=" + seen.transform[14].toFixed(3) + " (requested " + pose[14].toFixed(3) + ")" : "");
+  await native({ type: "deleteAnchor", id: created.id });
   const bad = await native({ type: "bogus" }).then(() => "resolved", e => "rejected: " + e.message);
   log("unknown type:", bad);
   await native({ type: "endSession" });
