@@ -17,7 +17,7 @@ let planeCalls = 0, latestPlanes = [], maxPlanes = 0, envs = [];
 const bridge = {
   onFrame() {},
   onPlanes(list) { planeCalls++; latestPlanes = list; maxPlanes = Math.max(maxPlanes, list.length); },
-  onAnchors() {},
+  onAnchors() {}, onVisibility() {},
   onEnvironment(env) { envs.push({ env, at: performance.now() }); },
   onSessionEnded(reason) { log("sessionEnded", reason); },
 };

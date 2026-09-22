@@ -9,114 +9,33 @@
 import { mat4 } from 'gl-matrix';
 import { P_DEVICE, type XRDevice } from 'iwer';
 import { XREnvironmentBlendMode, XRInteractionMode } from 'iwer/lib/session/XRSession.js';
-import { nativeFramebufferSize, devicePixelRatioOrOne } from './device.js';
 import type { NativeAnchorData } from './anchors.js';
+import {
+  isMode,
+  isTopFrame,
+  parseDeviceInfo,
+  scaleRect,
+  type DeviceInfo,
+  type FramePacket,
+  type HitTestHit,
+  type InterfaceOrientation,
+  type LightEstimate,
+  type NativeCallbacks,
+  type RenderMode,
+  type SessionReply,
+  type TrackingState,
+} from './bridge-types.js';
+import { nativeFramebufferSize, devicePixelRatioOrOne } from './device.js';
 import type { NativeHandData } from './hand-input.js';
-import type { NativeEnvironment } from './reflection.js';
 import type { NativePlaneData, PlaneEnvironment } from './hittest.js';
 import { PosePredictor } from './prediction.js';
+import type { NativeEnvironment } from './reflection.js';
 import { INERT_VIEWPORT } from './views.js';
 import { lookupPhone, type PhoneLookup } from './phones.js';
 import { clampIpd, computeStereo, IPD_DEFAULT, type PixelRect, type StereoParams } from './stereo.js';
 import { isRecord, type Transport } from './webkit.js';
 
-export type RenderMode = 'mono' | 'stereo';
-export type TrackingState = 'normal' | 'limited' | 'notAvailable';
-export type InterfaceOrientation = 'portrait' | 'portraitUpsideDown' | 'landscapeLeft' | 'landscapeRight';
-
-export interface LightEstimate {
-  ambientIntensity: number;
-  ambientColorTemperature: number;
-}
-
-export interface DeviceInfo {
-  model: string;
-  screenWidthPx: number;
-  screenHeightPx: number;
-  scale: number;
-  dpi: number;
-}
-
-export interface SessionReply {
-  ok: boolean;
-  mode?: RenderMode;
-  frameRate?: number;
-  error?: string;
-}
-
-export interface HitTestHit {
-  pose: number[];
-  type: 'plane' | 'estimated';
-}
-
-export interface FramePacket {
-  t: number;
-  mode: RenderMode;
-  transform: Float32Array;
-  view: Float32Array;
-  proj: Float32Array;
-  light: LightEstimate | null;
-  tracking: TrackingState;
-  orientation: InterfaceOrientation | undefined;
-  /** Native send time, epoch ms (diagnostics). */
-  sentAt: number | undefined;
-  /** One-way native -> page delivery latency, ms (undefined without sentAt). */
-  latencyMs: number | undefined;
-}
-
-/** The object native calls into (passed to native as a WKJSHandle). */
-export interface NativeCallbacks {
-  onFrame(
-    t: number,
-    mode: RenderMode,
-    transform: ArrayLike<number>,
-    view: ArrayLike<number>,
-    proj: ArrayLike<number>,
-    light: LightEstimate | null,
-    tracking: TrackingState,
-    orientation?: InterfaceOrientation,
-    sentAt?: number,
-  ): void;
-  onTracking(tracking: TrackingState): void;
-  onPlanes(planes: NativePlaneData[]): void;
-  onAnchors(anchors: NativeAnchorData[]): void;
-  onHands(hands: NativeHandData[]): void;
-  onEnvironment(environment: NativeEnvironment): void;
-  onSessionEnded(reason?: string): void;
-}
-
-const isMode = (v: unknown): v is RenderMode => v === 'mono' || v === 'stereo';
-
-function isTopFrame(): boolean {
-  try {
-    return globalThis.top === globalThis.self; // identity comparison is allowed cross-origin
-  } catch {
-    return false;
-  }
-}
-
-function parseDeviceInfo(v: unknown): DeviceInfo | undefined {
-  if (!isRecord(v)) return undefined;
-  const { model, screenWidthPx, screenHeightPx, scale, dpi } = v;
-  if (typeof screenWidthPx !== 'number' || typeof screenHeightPx !== 'number') return undefined;
-  return {
-    model: typeof model === 'string' ? model : '',
-    screenWidthPx,
-    screenHeightPx,
-    scale: typeof scale === 'number' ? scale : devicePixelRatioOrOne(),
-    dpi: typeof dpi === 'number' ? dpi : 0,
-  };
-}
-
-function scaleRect(r: PixelRect, sx: number, sy: number): PixelRect {
-  if (sx === 1 && sy === 1) return r;
-  return {
-    x: Math.round(r.x * sx),
-    y: Math.round(r.y * sy),
-    width: Math.round(r.width * sx),
-    height: Math.round(r.height * sy),
-  };
-}
+export type * from './bridge-types.js';
 
 export class HoloWebBridge {
   mode: RenderMode = 'mono';
@@ -135,6 +54,8 @@ export class HoloWebBridge {
   handsHandler: ((hands: NativeHandData[]) => void) | null = null;
   /** Receives onEnvironment reflection maps (ReflectionMaps). */
   environmentHandler: ((environment: NativeEnvironment) => void) | null = null;
+  /** Receives onVisibility states (visibility.ts). */
+  visibilityHandler: ((state: string) => void) | null = null;
   /** Stereo-only viewer pose prediction; horizonMs 0 disables it. */
   readonly predictor = new PosePredictor();
   /** Orientation / framebuffer size changes seen between frames (presentation rescales). */
@@ -165,6 +86,7 @@ export class HoloWebBridge {
       onAnchors: (anchors) => this.anchorsHandler?.(Array.isArray(anchors) ? anchors : []),
       onHands: (hands) => this.handsHandler?.(Array.isArray(hands) ? hands : []),
       onEnvironment: (environment) => this.environmentHandler?.(environment),
+      onVisibility: (state) => this.visibilityHandler?.(state),
       onSessionEnded: (reason) => this.onNativeSessionEnded?.(reason),
     };
   }

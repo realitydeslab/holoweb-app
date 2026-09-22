@@ -122,7 +122,7 @@ export function installFrameHooks(device: XRDevice, bridge: HoloWebBridge): void
 }
 
 /**
- * IWER allows one XRSession at a time and its `end` listener clears activeSession unconditionally.
+ * Session bookkeeping: IWER allows one XRSession at a time and its `end` listener clears activeSession unconditionally.
  * Pages often hold an inline ("magic window") session and then enter AR, so:
  * - requesting an immersive session parks the active inline session (it stays valid but its frame
  *   loop idles without running callbacks, as in Chrome while presenting) and grants the immersive one;
@@ -152,18 +152,19 @@ class SessionSlots {
   track(session: XRSession): void {
     this.live.add(session);
     const state = session[P_SESSION];
-    if (state.mode === 'inline') {
-      const frame = state.onDeviceFrame;
-      // IWER reschedules through this property, so the wrapper stays in the loop
-      state.onDeviceFrame = () => {
-        if (state.ended) return;
-        if (this.parked.has(session)) {
-          state.deviceFrameHandle = globalThis.requestAnimationFrame(state.onDeviceFrame);
-          return;
-        }
-        frame();
-      };
-    }
+    const inline = state.mode === 'inline';
+    const frame = state.onDeviceFrame;
+    // Idle (keep the loop, run no callbacks): a parked inline session, or an immersive session while
+    // the app is hidden (visibility.ts). IWER reschedules through this property, so the wrapper stays.
+    state.onDeviceFrame = () => {
+      if (state.ended) return;
+      const hidden = state.device[P_DEVICE].visibilityState === 'hidden';
+      if (inline ? this.parked.has(session) : hidden) {
+        state.deviceFrameHandle = globalThis.requestAnimationFrame(state.onDeviceFrame);
+        return;
+      }
+      frame();
+    };
     // registered after IWER's own listener, which has just cleared activeSession
     session.addEventListener('end', () => this.onEnd(session), { once: true });
   }

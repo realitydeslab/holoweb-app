@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+<head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>body{margin:0;background:transparent;color:#fff;font:13px -apple-system,sans-serif}pre{margin:70px 8px 8px;padding:8px;background:#0008;white-space:pre-wrap}</style>
+</head>
+<body><pre id="out"></pre>
+<script>
+// Raw-bridge check of onMeshes (plan/bridge_protocol.md). LiDAR meshes need geometry within a few
+// metres; slowly sweeping the phone over a room fills them in.
+const out = document.getElementById("out");
+const log = (...a) => { const s = a.join(" "); console.log("[mesh-check] " + s); out.textContent += s + "\n"; };
+const native = (msg) => window.webkit.messageHandlers.holoweb.postMessage(msg);
+// Machine-readable results for Scripts/regression.py: "[check] PASS|FAIL <name> <detail>".
+const check = (name, ok, detail = "") => console.log(`[check] ${ok ? "PASS" : "FAIL"} ${name} ${detail}`);
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+const updates = [];  // { at, update }
+const bridge = {
+  onFrame() {}, onPlanes() {}, onAnchors() {}, onEnvironment() {}, onHands() {}, onVisibility() {},
+  onMeshes(update) { updates.push({ at: performance.now(), update }); },
+  onSessionEnded(reason) { log("sessionEnded", reason); },
+};
+window.__holoweb = bridge;
+
+const bytes = (b64) => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+
+(async () => {
+  const handle = typeof window.webkit?.createJSHandle === "function" ? window.webkit.createJSHandle(bridge) : null;
+  await native({ type: "ready", bridge: handle });
+  await native({ type: "requestSession", mode: "immersive-ar", features: ["local", "mesh-detection"] });
+  const t0 = performance.now();
+  while (performance.now() - t0 < 12000) await sleep(250);
+  const meshes = updates.flatMap(u => u.update.meshes || []);
+  log("onMeshes calls:", updates.length, "meshes:", meshes.length, "removed:", updates.reduce((s, u) => s + (u.update.removed || []).length, 0));
+  check("mesh.received", meshes.length > 0, meshes.length ? `${meshes.length} meshes in ${updates.length} updates` : "no meshes: LiDAR needs geometry in view, move the phone");
+  if (!meshes.length) {
+    for (const name of ["mesh.shape", "mesh.indices-in-range", "mesh.rate"]) check(name, false, "no meshes");
+  } else {
+    let bad = 0, outOfRange = 0, verts = 0, tris = 0; const labels = {};
+    for (const m of meshes) {
+      const v = new Float32Array(bytes(m.vertices).buffer), i = new Uint32Array(bytes(m.indices).buffer);
+      const n = v.length / 3;
+      if (typeof m.id !== "string" || m.transform?.length !== 16 || v.length % 3 || i.length % 3 || !v.every(Number.isFinite) || typeof m.lastChanged !== "number") bad++;
+      if (i.some(x => x >= n)) outOfRange++;
+      verts += n; tris += i.length / 3;
+      if (m.semanticLabel) labels[m.semanticLabel] = (labels[m.semanticLabel] || 0) + 1;
+    }
+    log("vertices:", verts, "triangles:", tris, "labels:", JSON.stringify(labels));
+    check("mesh.shape", !bad, bad ? `${bad}/${meshes.length} malformed` : `${verts} vertices, ${tris} triangles`);
+    check("mesh.indices-in-range", !outOfRange, outOfRange ? `${outOfRange} meshes with out-of-range indices` : "");
+    // At most 2 Hz, except continuation updates when one would exceed the ~2 MB budget.
+    const gaps = updates.slice(1).map((u, k) => u.at - updates[k].at);
+    const fast = gaps.filter(g => g < 400).length;
+    check("mesh.rate", fast <= updates.length / 4, gaps.length ? `min gap ${Math.min(...gaps).toFixed(0)} ms, ${fast} < 400 ms` : "1 update");
+  }
+  await native({ type: "endSession" });
+  log("DONE");
+})().catch(e => { log("ERROR", e.message); check("mesh.script", false, e.message); });
+</script>
+</body></html>

@@ -13,6 +13,7 @@ import { mat4, quat, vec3, vec4 } from 'gl-matrix';
 import { P_DEVICE, P_SESSION, P_SPACE, XRDevice, XRInputSource, XRInputSourceEvent, XRSession, XRSessionEvent, XRSpace } from 'iwer';
 import { XRHandedness, XRTargetRayMode } from 'iwer/lib/input/XRInputSource.js';
 import { XREye } from 'iwer/lib/views/XRView.js';
+import { isVisible } from './visibility.js';
 
 type Phase = 'new' | 'announced' | 'pressed';
 
@@ -79,7 +80,7 @@ export class ScreenInput {
   }
 
   private readonly onDown = (e: PointerEvent): void => {
-    if (!this.session || this.touch) return;
+    if (!this.session || this.touch || !isVisible(this.device)) return;
     // DOM Overlays: a touch on overlay content is XR input unless the page cancels `beforexrselect`.
     if (this.overlayRoot && e.target instanceof Node && this.overlayRoot.contains(e.target)) {
       const event = new XRSessionEvent('beforexrselect', { session: this.session, bubbles: true, cancelable: true });
@@ -120,6 +121,12 @@ export class ScreenInput {
     if (!touch || !session || frame.session !== session) return;
     const fire = (type: string) =>
       session.dispatchEvent(new XRInputSourceEvent(type, { frame, inputSource: touch.source }));
+    if (!isVisible(this.device)) {
+      // blurred / hidden: the press ends without a select, and the source goes away
+      if (touch.phase === 'pressed') fire('selectend');
+      this.touch = null;
+      return;
+    }
     this.updateRay(touch);
     if (touch.phase === 'new') {
       touch.phase = 'announced';

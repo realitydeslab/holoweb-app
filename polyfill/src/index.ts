@@ -17,6 +17,7 @@ import { PlaneTracking } from './planes.js';
 import { installReflectionBinding, ReflectionMaps } from './reflection.js';
 import { installFrameHooks, installSessionHooks } from './session.js';
 import { installViewCountPolicy } from './views.js';
+import { applyVisibility } from './visibility.js';
 import { installOpaqueFramebuffer } from './webgl-layer.js';
 import { getWebKit, nullTransport, webkitTransport, type Transport } from './webkit.js';
 
@@ -65,6 +66,7 @@ export function install(): HoloWebGlobal {
   bridge.planeListeners.add((list) => planes.update(list));
   const reflections = new ReflectionMaps();
   bridge.environmentHandler = (env) => reflections.update(env);
+  bridge.visibilityHandler = (state) => applyVisibility(device, state);
   installSessionHooks(device, bridge, input, () => {
     anchors.clear();
     hands.reset();

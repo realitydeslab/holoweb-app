@@ -15,6 +15,7 @@
 import { mat4, quat, vec3 } from 'gl-matrix';
 import { P_DEVICE, P_GAMEPAD, P_JOINT_SPACE, P_SPACE, XRDevice, XRInputSourceEvent, XRSession } from 'iwer';
 import type { XRHandInput } from 'iwer/lib/device/XRHandInput.js';
+import { isVisible } from './visibility.js';
 import { buildSkeleton, isCompleteHand, JOINTS, pinchPoint, pinchState, VISION_JOINT_COUNT, type Handedness } from './hands.js';
 
 export interface NativeHandData {
@@ -69,6 +70,7 @@ export class HandTracking {
 
   /** Apply a native hands update (Vision rate, typically 30 Hz). */
   update(list: readonly NativeHandData[]): void {
+    if (!isVisible(this.device)) return; // no input while blurred / hidden
     const now = performance.now();
     for (const data of list) {
       const hand = data && this.hands[data.handedness];
@@ -146,7 +148,7 @@ export class HandTracking {
     for (const hand of Object.values(this.hands)) {
       const source = hand.input.inputSource;
       const fire = (type: string) => tracking && session.dispatchEvent(new XRInputSourceEvent(type, { frame, inputSource: source }));
-      if (hand.input.connected && now - hand.lastSeen > LOST_MS) {
+      if (hand.input.connected && (now - hand.lastSeen > LOST_MS || !isVisible(this.device))) {
         // lost while pinching: end the press without a select (spec: source removed)
         if (hand.pressed) fire('selectend');
         this.resetHand(hand);

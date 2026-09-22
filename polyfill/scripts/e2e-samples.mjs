@@ -90,6 +90,71 @@ const SAMPLES = {
       return `header ${header}, planes=${planes}, anchors=${anchors}`;
     },
   },
+  'tests/exit-button': {
+    // immersive-vr only (G7); tapping the in-world ButtonNode at (0, 1.2, -0.65) in local-floor calls session.end()
+    async run(page, problems) {
+      // remember the VR session itself: when it ends, the page's parked inline session becomes active again (G3)
+      const mode = await page.evaluate(() => {
+        const vr = (window.__vrSession = window.__holoweb.bridge.device.activeSession);
+        vr.addEventListener('end', () => (window.__vrEnded = true));
+        return vr.environmentBlendMode;
+      });
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const target = await page.evaluate(
+          () =>
+            new Promise((resolve) => {
+              const session = window.__vrSession;
+              if (window.__vrEnded) return resolve(null);
+              setTimeout(() => resolve(null), 2000); // the session may end (the goal) before the next frame
+              session.requestReferenceSpace('local-floor').then((floor) =>
+                session.requestAnimationFrame((_t, frame) => {
+                  const view = frame.getViewerPose(floor)?.views[0];
+                  if (!view) return resolve(null);
+                  const p = [0, 1.2, -0.65, 1];
+                  const inv = view.transform.inverse.matrix;
+                  const pr = view.projectionMatrix;
+                  const mul = (m, v) => [0, 1, 2, 3].map((r) => m[r] * v[0] + m[4 + r] * v[1] + m[8 + r] * v[2] + m[12 + r] * v[3]);
+                  const clip = mul(pr, mul(inv, p));
+                  resolve({ x: ((clip[0] / clip[3] + 1) / 2) * innerWidth, y: ((1 - clip[1] / clip[3]) / 2) * innerHeight, w: clip[3] });
+                }),
+              );
+            }),
+        );
+        if (!target) break;
+        if (target.w > 0) await page.mouse.click(target.x, target.y);
+        await page.waitForTimeout(300);
+      }
+      const ended = await page.evaluate(() => window.__vrEnded === true);
+      if (mode !== 'opaque') problems.push(`blend mode ${mode}, expected opaque (immersive-vr)`);
+      if (!ended) problems.push('tapping the in-world exit button did not end the session');
+      const inlineBack = await page.evaluate(() => window.__holoweb.bridge.device.activeSession !== window.__vrSession && Boolean(window.__holoweb.bridge.device.activeSession));
+      return `immersive-vr (${mode}), ended by in-world button=${ended}, inline session resumed=${inlineBack}`;
+    },
+  },
+  'immersive-hands': {
+    // tries immersive-vr first; hand-tracking optional; the mock sends a pinching right hand
+    async run(page, problems) {
+      await page.waitForTimeout(600);
+      const hands = await page.evaluate(() => [...window.__holoweb.bridge.device.activeSession.inputSources].filter((s) => s.hand).map((s) => `${s.handedness}:${s.hand.size}`));
+      if (!hands.includes('right:25')) problems.push(`hand input sources ${JSON.stringify(hands)}`);
+      return `hands=${JSON.stringify(hands)}`;
+    },
+  },
+  'webgpu/immersive-ar-session': {
+    async run(page, problems) {
+      const layers = await page.evaluate(() => (window.__holoweb.bridge.device.activeSession.renderState.layers ?? []).length);
+      if (layers !== 1) problems.push(`renderState.layers length ${layers}`);
+      return `XRGPUBinding projection layer=${layers}`;
+    },
+  },
+  'webgpu/immersive-hands': {
+    async run(page, problems) {
+      await page.waitForTimeout(600);
+      const hands = await page.evaluate(() => [...window.__holoweb.bridge.device.activeSession.inputSources].filter((s) => s.hand).length);
+      if (hands < 1) problems.push('no hand input source');
+      return `hands=${hands}`;
+    },
+  },
   'tests/interrupted-ar': {
     // the page throws on purpose right after the session resolves, then sets its layer 5 s later
     allow: [/Exception is not defined/],
@@ -145,6 +210,11 @@ async function runSample({ browser, root, shotDir }, name, spec) {
 export async function runSampleChecks(env) {
   const names = process.env.HOLOWEB_E2E_SAMPLES ? process.env.HOLOWEB_E2E_SAMPLES.split(',') : Object.keys(SAMPLES);
   let failures = 0;
-  for (const name of names) failures += await runSample(env, name, SAMPLES[name]);
+  for (const name of names) {
+    const limit = new Promise((resolve) => setTimeout(() => resolve('timeout'), 90000));
+    const result = await Promise.race([runSample(env, name, SAMPLES[name]), limit]);
+    if (result === 'timeout') console.log(`FAIL webxr-samples/${name}: timed out after 90 s`);
+    failures += result === 'timeout' ? 1 : result;
+  }
   return { failures, cases: names.length };
 }

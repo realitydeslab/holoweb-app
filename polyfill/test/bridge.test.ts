@@ -123,9 +123,9 @@ describe('bridge ready handshake', () => {
     expect(posted.filter((m) => m.type === 'ready').length).toBe(before + 1);
   });
 
-  it('installs navigator.xr and supports immersive-ar', async () => {
+  it('installs navigator.xr and supports immersive-ar (and immersive-vr, opaque)', async () => {
     await expect(xr().isSessionSupported('immersive-ar')).resolves.toBe(true);
-    await expect(xr().isSessionSupported('immersive-vr')).resolves.toBe(false);
+    await expect(xr().isSessionSupported('immersive-vr')).resolves.toBe(true);
   });
 });
 

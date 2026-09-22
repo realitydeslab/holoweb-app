@@ -18,7 +18,7 @@ const calls = [];  // { at, hands }
 let camera = null;
 const bridge = {
   onFrame(t, mode, transform) { camera = transform; },
-  onPlanes() {}, onAnchors() {}, onEnvironment() {},
+  onPlanes() {}, onAnchors() {}, onEnvironment() {}, onVisibility() {},
   onHands(hands) { calls.push({ at: performance.now(), hands, camera: camera && camera.slice(12, 15) }); },
   onSessionEnded(reason) { log("sessionEnded", reason); },
 };

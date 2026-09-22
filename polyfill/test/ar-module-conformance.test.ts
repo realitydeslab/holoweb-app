@@ -24,6 +24,7 @@ interface XR {
   requestSession(mode: string, init?: object): Promise<Session>;
 }
 let hw: HoloWebGlobal;
+const posted: Msg[] = [];
 const xr = () => (navigator as unknown as { xr: XR }).xr;
 const inFrame = <T>(s: Session, fn: (f: Frame) => T = () => undefined as T) =>
   new Promise<T>((resolve, reject) => s.requestAnimationFrame((_t, f) => { try { resolve(fn(f)); } catch (e) { reject(e); } }));
@@ -43,18 +44,43 @@ async function start(init: object = {}): Promise<{ session: Session; local: unkn
 beforeAll(async () => {
   (globalThis as Record<string, unknown>).WebGL2RenderingContext = class {};
   (globalThis as Record<string, unknown>).webkit = {
-    messageHandlers: { holoweb: { postMessage: (m: Msg) => Promise.resolve(m.type === 'requestSession' ? { ok: true, mode: 'mono' } : { ok: true }) } },
+    messageHandlers: {
+      holoweb: {
+        postMessage: (m: Msg) => {
+          posted.push(m);
+          return Promise.resolve(m.type === 'requestSession' ? { ok: true, mode: 'mono' } : { ok: true });
+        },
+      },
+    },
   };
   await import('../src/index.js');
   hw = (globalThis as unknown as { __holoweb: HoloWebGlobal }).__holoweb;
 });
 
 describe('WebXR AR Module conformance', () => {
-  it('XRSessionMode: immersive-ar is a supported XRSessionMode (and immersive-vr is not offered)', async () => {
+  it('XRSessionMode: immersive-ar is a supported XRSessionMode (immersive-vr too, as opaque VR)', async () => {
     await expect(xr().isSessionSupported('immersive-ar')).resolves.toBe(true);
-    await expect(xr().isSessionSupported('immersive-vr')).resolves.toBe(false);
+    await expect(xr().isSessionSupported('immersive-vr')).resolves.toBe(true);
     const { session } = await start();
     await session.end();
+  });
+
+  it("XREnvironmentBlendMode: an immersive-vr session is 'opaque' in mono and stereo, and native is told the mode", async () => {
+    const session = await xr().requestSession('immersive-vr');
+    try {
+      session.updateRenderState({ layers: [{}] });
+      push('mono');
+      await inFrame(session);
+      const modes = [session.environmentBlendMode, session.interactionMode];
+      push('stereo');
+      await inFrame(session);
+      modes.push(session.environmentBlendMode, session.interactionMode);
+      expect(modes).toEqual(['opaque', 'screen-space', 'opaque', 'world-space']);
+      expect(posted.filter((m) => m.type === 'requestSession').at(-1)).toMatchObject({ mode: 'immersive-vr' });
+    } finally {
+      push('mono');
+      await session.end();
+    }
   });
 
   it('XREnvironmentBlendMode: environmentBlendMode reports the compositor: alpha-blend in mono, additive in HoloKit stereo, following mid-session toggles', async () => {
