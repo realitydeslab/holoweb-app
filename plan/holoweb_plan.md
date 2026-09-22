@@ -1,5 +1,7 @@
 # HoloWeb Implementation Plan
 
+> Complete list of every feature and test with current status: **`plan/feature_registry.md`** (keep it updated whenever a feature or test is added).
+
 Date: 2026-09-22. Toolchain: Xcode 27.0 (27A266a), iOS 26.5 + 27.0 runtimes, deployment target iOS 26.0.
 Evidence for every claim below is in `plan/notes.md`.
 
