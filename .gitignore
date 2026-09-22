@@ -61,3 +61,8 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
+
+# polyfill build outputs
+polyfill/node_modules/
+polyfill/dist/
+polyfill/test-results/

@@ -55,6 +55,8 @@ final class HoloWebState: NSObject {
                 WKUserScript(source: polyfill, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         }
 
+        configuration.setURLSchemeHandler(BundledPageSchemeHandler(), forURLScheme: BundledPageSchemeHandler.scheme)
+
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.isOpaque = false
         webView.backgroundColor = .clear
@@ -82,16 +84,16 @@ final class HoloWebState: NSObject {
 
     func load(_ url: URL) {
         self.url = url
-        if url.isFileURL {
-            webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
-        } else {
-            webView.load(URLRequest(url: url))
-        }
+        webView.load(URLRequest(url: url))
     }
 
-    /// Resolves a page bundled under `Web/` (debug pages such as `webgpu-check.html`).
-    static func bundledPage(_ name: String) -> URL? {
-        Bundle.main.url(forResource: name, withExtension: nil, subdirectory: "Web")
+    /// Resolves a page bundled under `Web/`, e.g. `webgpu-check.html` or
+    /// `examples/three-ar.html?autostart`. A query string is kept.
+    static func bundledPage(_ path: String) -> URL? {
+        let file = String(path.split(separator: "?", maxSplits: 1)[0])
+        guard let web = Bundle.main.resourceURL?.appending(path: "Web"),
+              FileManager.default.fileExists(atPath: web.appending(path: file).path) else { return nil }
+        return BundledPageSchemeHandler.url(forBundledPath: path)
     }
 
     func reload() {

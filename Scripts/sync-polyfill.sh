@@ -1,10 +1,16 @@
 #!/bin/bash
-# Builds the WebXR polyfill and copies it into the app's bundled Web/ folder,
-# where HoloWebState injects it as a document-start user script.
+# Builds the WebXR polyfill and copies it (plus its example pages) into the app's
+# bundled Web/ folder. HoloWebState injects Web/holoweb-polyfill.js at document start.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT/polyfill"
 [ -d node_modules ] || npm ci
 npm run build
-cp dist/holoweb-polyfill.js "$ROOT/HoloWeb/Web/holoweb-polyfill.js"
-ls -l "$ROOT/HoloWeb/Web/holoweb-polyfill.js"
+WEB="$ROOT/HoloWeb/Web"
+cp dist/holoweb-polyfill.js "$WEB/holoweb-polyfill.js"
+mkdir -p "$WEB/examples"
+cp examples/*.js "$WEB/examples/"
+for f in examples/*.html; do
+  sed 's#\.\./dist/holoweb-polyfill\.js#../holoweb-polyfill.js#' "$f" > "$WEB/examples/$(basename "$f")"
+done
+ls -l "$WEB/holoweb-polyfill.js" "$WEB/examples"

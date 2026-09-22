@@ -1,0 +1,31 @@
+{
+  "name": "holoweb-polyfill",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "postinstall": "patch-package",
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run",
+    "test:e2e": "node scripts/e2e.mjs"
+  },
+  "dependencies": {
+    "gl-matrix": "3.4.4",
+    "iwer": "2.4.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/webxr": "0.5.24",
+    "@webgpu/types": "0.1.74",
+    "esbuild": "0.28.2",
+    "happy-dom": "20.14.5",
+    "patch-package": "8.0.1",
+    "playwright": "1.63.0",
+    "three": "0.186.0",
+    "typescript": "7.0.2",
+    "vitest": "5.0.1"
+  },
+  "description": "HoloWeb WebXR runtime for WKWebView: IWER 2.4.0 core + HoloKit device + ARKit bridge"
+}

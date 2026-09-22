@@ -121,3 +121,61 @@ three.js WebGPU-backend XR path needs only: `globalThis.XRGPUBinding` constructo
 - WKWebView requestAnimationFrame on this ProMotion device: 60.5 Hz (not 120).
 - `rendered` message sent every rAF tick while streaming: no drop in onFrame rate (60.0/s, 0 skipped).
 - Renderer now draws the camera image of the frame the page last reported via `rendered` (3-frame ring in ARBridge); falls back to the newest frame for pages that never report (non-polyfill pages).
+
+## Polyfill execution log (M2, M4-JS)
+
+2026-09-22. Scope: `polyfill/` only (no Swift / Xcode changes). Not committed.
+
+### Built artifacts
+- `polyfill/dist/holoweb-polyfill.js`: minified IIFE, 148.0 KB (45.9 KB gzip), budget 250 KB. `polyfill/dist/holoweb-polyfill.dev.js`: 810 KB unminified with inline source map. Not copied outside `polyfill/`; native should bundle the minified file into `HoloWeb/Web/` (App Clip impact about +148 KB).
+- Bundle contents: IWER 2.4.0 core + gl-matrix + HoloWeb sources. The build fails if any `iwer/lib/remote` or `iwer/lib/native` byte is bundled. `webxr-layers-polyfill` is stubbed (-60 KB; only used by `polyfillLayers: true`).
+
+### IWER fork
+- Chosen: `iwer@2.4.0` pinned + `patch-package` (`polyfill/patches/iwer+2.4.0.patch`, 7 files, 110 changed lines, every hunk tagged `HOLOWEB:`), not vendoring. Reason: upstream publishes compiled `lib/` + `.d.ts`, so one patch file is the whole fork; rebasing = bump the pin + re-run patch-package. Rationale and hunk list are in `polyfill/README.md`.
+- Patches: (1) `nativeProjection` per eye with [10]/[14] rebuilt from depthNear/depthFar (immersive + inline); (2) `nativeViewports` per eye; (3) immersive + `stereoEnabled=false` returns one `'none'` view; (4) `renderState.layers` + layers-only frame loop; (5) `onFrameEnd` hook; (6) RemoteControlInterface removed; (7) `XRRay.matrix` axis bug fixed (non-default rays pointed the wrong way); (8) `WebXRFeature` += `light-estimation`, `webgpu`.
+- Requirement "installRuntime without navigator.xr / immersive-ar / enabledFeatures echo incl. webgpu" needed no patch (device config); the config passes the real UA because IWER overwrites `navigator.userAgent`.
+
+### Verification (all run on this Mac)
+- `npm run typecheck` (tsc 7.0.2, strict): clean.
+- `npm test` (vitest 5, happy-dom): 25/25 pass. `test/stereo.test.ts`: iPhone14,2 golden values from an independent Python transcription of `HoloKitCameraManager.SetupCameraData` (runtime screen 2532x1170, 460 dpi): P00 2.1900685, P11 2.6802179, P02 0 at ipd 0.064 and +/-0.1027397 at ipd 0.070 (right eye sign flip), P22 -1.0001279, P23 -0.1279082 (near 0.06395, far 1000); viewports left (158, 47, 1058, 864), right (1317, 47, 1058, 864) px, bottom-left origin; cameraToCenterEye (WebXR, z towards user) (0.042005, -0.08703, 0.07782). Mono [10]/[14] rewrite equals `mat4.perspective` with the new depth range. `test/bridge.test.ts`: ready posts a WKJSHandle, requestSession resolves the reply, feature echo incl. webgpu, mono/stereo onFrame -> viewer pose + projections, rendered posted per frame, JS hit test against onPlanes, endSession on page end, no echo on native end.
+- `npm run test:e2e` (Playwright 1.63 Chromium, headless, `--enable-unsafe-webgpu`, WebGPU adapter present): 8/8 pass. Covered: `examples/three-ar.html` (WebGPURenderer forceWebGL) and `examples/three-ar-webgpu.html` (WebGPU backend + XRGPUBinding), each in mono and stereo; WebGL mono->stereo and stereo->mono mid-session; WebGPU mono->stereo (session ends, page re-enters); WebGPU stereo with a late phone-model change (presenter blit path). Each case asserts: no console errors or GPU warnings, >= 60 XR frames, hit-test results, tap placed an object, expected view count (1/2), expected backend, reticle pixels visible in a screenshot. Screenshots were also checked by eye.
+- Not run: anything on a device. The WebGPU presenter compositing over the Metal camera layer, HoloKit alignment, and three.js performance at native resolution on iPhone are unverified.
+
+### Protocol deviations / clarifications (plan/bridge_protocol.md)
+- `requestSession` goes to native only for `immersive-ar`; inline sessions stay JS-only, so native never sees `mode: "inline"`.
+- `onFrame`: `transform` is used as the viewer pose (per the updated protocol); `view` is only a fallback. `orientation` is stored; `sentAt` becomes `__holoweb.bridge.latest.latencyMs`.
+- `rendered { t }` is posted after every immersive XR frame in both modes, fire and forget; `t` = timestamp of the latest applied frame.
+- `onPlanes[].transform` is assumed to be the plane centre pose (ARPlaneAnchor.transform x T(center)) with local +Y = normal and `extent` along local X/Z.
+- Stereo orientation: the protocol text says `.landscapeLeft`, but the phone-table offsets assume Unity LandscapeLeft = `UIInterfaceOrientation.landscapeRight`. That matches native's `setMode(.stereo)` (M3 log). The protocol text should be updated.
+- Native `hitTest` is exposed as `__holoweb.hitTest(origin, dir)` (one round trip, 6-8 ms measured by native). `XRHitTestSource` results come from the JS plane raycast (in frame, zero IPC).
+- Mono <-> stereo during a session: WebGL sessions follow it. Sessions rendering through XRGPUBinding are ended, because three.js' WebGPU backend cannot change view count mid-session (crash reproduced in e2e before the fix).
+
+### Findings worth knowing
+- three.js r186 WebGPURenderer, WebGL2 backend, flips XR sub-camera viewports as if they were top-left (`context.height - height - y`). This is harmless for full-height viewports, but it moves HoloKit eye rects up by H - 2y - h px (~130 of 780 px in e2e). The WebGPU backend and classic WebGLRenderer are correct. Recommend the WebGPU backend for stereo content until this is fixed upstream.
+- three.js' WebGL2 backend needs a non-null `XRWebGLLayer.framebuffer` (it is used as a WeakMap key). The polyfill hands out a sentinel framebuffer that the context maps to the default framebuffer, so there is no copy and no extra GPU pass.
+- three.js reads `framebufferWidth` right after `setPixelRatio(1)`, so the layer must report the native size itself; otherwise the XR target is 1/dpr size and offset.
+- IWER's `local` space is anchored at the viewer pose at request time; it is overridden to the ARKit origin.
+- While immersive, page content is hidden except the XR canvases and the dom-overlay root, and html/body backgrounds are transparent (otherwise page backgrounds hide the camera and page text shows in the headset).
+
+### Open issues
+- Device run needed: three-ar / three-ar-webgpu over the camera (mono), HoloKit X alignment (stereo), fps at native resolution.
+- `light-estimation` is advertised but there is no `XRLightProbe` API yet (M7); the latest estimate is on `__holoweb.bridge.latest.light`.
+- `local-floor` is computed at request time; no `reset` event when the floor estimate changes.
+- Anchors are IWER's static anchors, not ARKit anchors (M7).
+- `XRGPUBinding` supports `textureType: 'texture-array'` only; canvas and layer sizes are fixed at session start (no rotation handling in mono).
+- Single-touch input only; `beforexrselect` is not implemented.
+
+## Integration on device (M2 + M4 + M5 smoke), iPhone 15 Pro, iOS 27
+- Polyfill injected from HoloWeb/Web/holoweb-polyfill.js (148 KB) at document start. `Scripts/sync-polyfill.sh` builds polyfill/ and copies the bundle + examples into HoloWeb/Web/.
+- Bundled pages are served at holoweb-app://local/... by BundledPageSchemeHandler, because file:// pages cannot import local ES modules (WebKit: "Cross-origin script load denied by Cross-Origin Resource Sharing policy"). The custom scheme keeps navigator.gpu, navigator.xr and createJSHandle available.
+- Unattended runs with `?autostart` (and `&mode=stereo`), stats every 2 s, phone lying still:
+
+| Example | Mode | Backend | Views | XR fps (steady) | Canvas | Errors |
+|---|---|---|---|---|---|---|
+| three-ar.html | mono | webgl | 1 | 60 | 2556x1179 | none |
+| three-ar-webgpu.html | mono | webgpu (XRGPUBinding) | 1 | 60 | 2556x1179 | none |
+| three-ar-webgpu.html | stereo | webgpu (XRGPUBinding) | 2 | 60 | 2556x1179 | none |
+| three-ar.html | stereo | webgl | 2 | 58.5-59.5 | 2556x1179 | none |
+
+- Bridge: ~20 frames skipped only in the first second (page startup), then 0. Delivery latency ~0-1 ms (small negative values are wall-clock jitter between processes).
+- Not yet verified (needs a person holding the phone): visual camera/content alignment in mono, hit-test reticle on a real floor (hitFrames stayed 0 because the phone was lying still with no planes), HoloKit X optical alignment in stereo.

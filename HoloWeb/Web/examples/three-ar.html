@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <title>HoloWeb AR hit-test (WebGL2 backend)</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+      #info { position: absolute; top: 8px; width: 100%; text-align: center; font: 13px system-ui; color: #fff; text-shadow: 0 0 3px #000; }
+    </style>
+    <!-- In the app this is injected at document start; loading it first here does the same. -->
+    <script src="../holoweb-polyfill.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.webgpu.js",
+          "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.webgpu.js",
+          "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.tsl.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="info">HoloWeb &middot; WebGPURenderer (forceWebGL) &middot; tap to place</div>
+    <script type="module">
+      import * as THREE from 'three/webgpu';
+      import { runARScene } from './ar-scene.js';
+
+      const renderer = new THREE.WebGPURenderer({ forceWebGL: true, antialias: true, alpha: true });
+      runARScene({ renderer, sessionInit: { requiredFeatures: ['hit-test'] } });
+    </script>
+  </body>
+</html>
