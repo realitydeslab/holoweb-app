@@ -4,11 +4,15 @@
 // 2. A-Frame 1.8 model-viewer (network, skipped offline): xr-mode-ui XRMode: xr calls
 //    navigator.xr.offerSession at load. With offerSession removed there must be no
 //    "Failed to enter VR mode" error, and the AR button must enter a running session.
+// 3. modelviewer.dev augmented-reality examples (network, skipped offline): the default AR button in a
+//    <model-viewer> shadow root enters WebXR AR and model-viewer places the model (device bug: its
+//    XRRay({x,y,z}) direction without `w` threw; XRRayDirectionInit defaults w to 0).
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const CDN = /^https:\/\/cdn\.jsdelivr\.net\/npm\/three@0\.186\.0\/(.*)$/;
 const AFRAME = 'https://aframe.io/aframe/examples/showcase/model-viewer/';
+const MODEL_VIEWER = 'https://modelviewer.dev/examples/augmentedreality/';
 
 async function newPage(browser, root, problems, { strictConsole = true } = {}) {
   const context = await browser.newContext({ viewport: { width: 844, height: 390 }, deviceScaleFactor: 2 });
@@ -110,7 +114,40 @@ async function aframeCase({ browser, root, shotDir }) {
   return problems.length ? 1 : 0;
 }
 
+async function modelViewerCase({ browser, root, shotDir }) {
+  const problems = [];
+  const { context, page } = await newPage(browser, root, problems, { strictConsole: false });
+  page.on('console', (m) => m.type() === 'error' && /XRRay|XRSession|WebXR/.test(m.text()) && problems.push(`console.error: ${m.text().slice(0, 200)}`));
+  const label = 'modelviewer.dev augmentedreality (live) [default AR button in shadow root]';
+  try {
+    await page.addInitScript({ path: join(root, 'dist/holoweb-polyfill.js') });
+    try {
+      await page.goto(MODEL_VIEWER, { waitUntil: 'load', timeout: 45000 });
+    } catch (err) {
+      console.log(`SKIP ${label} (network): ${String(err.message).split('\n')[0]}`);
+      await context.close();
+      return 0;
+    }
+    // the first example slots its own button; the next one shows model-viewer's default #default-ar-button
+    const viewer = page.locator('model-viewer[ar]').nth(1);
+    await viewer.scrollIntoViewIfNeeded();
+    await viewer.locator('#default-ar-button').click({ timeout: 20000 });
+    await page.waitForFunction(() => Boolean(window.__holoweb.bridge.device.activeSession), null, { timeout: 10000 });
+    await page.waitForFunction(() => document.querySelectorAll('model-viewer[ar]')[1].getAttribute('ar-status') === 'object-placed', null, { timeout: 10000 });
+    const xr = await sampleXR(page.mainFrame());
+    if (xr.frames < 20) problems.push(`XR loop: ${JSON.stringify(xr)}`);
+    await writeFile(join(shotDir, 'model-viewer-ar.png'), await page.screenshot());
+    console.log(`${problems.length ? 'FAIL' : 'PASS'} ${label}: ar-status=object-placed, XR frames=${xr.frames} views=${xr.views}`);
+  } catch (err) {
+    problems.push(String(err.message ?? err).split('\n')[0]);
+    console.log(`FAIL ${label}`);
+  }
+  for (const p of problems) console.log(`    ${p}`);
+  await context.close();
+  return problems.length ? 1 : 0;
+}
+
 export async function runFrameChecks(env) {
-  const failures = (await iframeCase(env)) + (await aframeCase(env));
-  return { failures, cases: 2 };
+  const failures = (await iframeCase(env)) + (await aframeCase(env)) + (await modelViewerCase(env));
+  return { failures, cases: 3 };
 }

@@ -663,3 +663,14 @@ Mac check (scratchpad/chir.swift):
 Device (show.sh hands2, hands-check.html):
 - hands.chirality-first-person 178/178. The phone's Vision said "right,left" for the same view, so it is inconsistent even between devices.
 - 22.2 results/s, Vision 18–20 ms with two hands, 21/21 joints with measured depth, depth spread 3.0 cm (flat photo), wrist 0.38 m.
+
+## Polyfill execution log (XRRay direction defaults: model-viewer on device)
+
+- Device: modelviewer.dev/examples/augmentedreality entered AR, then threw `TypeError: Invalid direction value to construct XRRay` (my patch's message).
+- Cause: my earlier XRRay patch gave `direction` DOMPointInit defaults (z 0, w 1). The hit-test spec types it as `XRRayDirectionInit { x = 0; y = 0; z = -1; w = 0 }`, and Chromium's xr_ray.cc agrees. So `{x, y, z}` without `w` is valid. Chromium throws only on zero length, direction.w != 0 (e.g. a DOMPoint) and origin.w != 1.
+- Fix: the IWER patch now uses XRRayDirectionInit defaults, the same checks, and Chromium's TypeError messages. test/globals.test.ts now asserts the Chromium behaviour; the earlier test encoded my misreading.
+- e2e: new live case in e2e-frames.mjs. It clicks model-viewer's #default-ar-button in the shadow root of the page's second <model-viewer ar>; the first slots its own button. Expected: an active session, ar-status 'object-placed', 20 XR frames.
+  - Passes in Chromium and WebKit.
+  - Negative control, a bundle with the old defaults: "Direction's `w` component must be set to 0.0f!", then model-viewer's null-property page errors.
+- Flake: Needle (live) twice got no image results within 15 s, only in full-suite runs; run alone it streams about 60 queries/s in both engines. The live cases now retry the AR entry once if no session starts within 8 s, and a failure prints stats, session, features and visibility.
+- Verification: npm test 111/111 (17 files); e2e 40/40 (Chromium + WebKit image cases); e2e WebKit full 37/37.

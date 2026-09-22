@@ -115,8 +115,23 @@ async function liveCase({ browser, root, shotDir }, label, url, enter, appFrame)
       return 0;
     }
     await enter(page);
-    const frame = await appFrame(page);
-    await frame.waitForFunction(() => window.__holoweb?.images.stats.framesWithResults > 10, null, { timeout: 15000 });
+    let frame = await appFrame(page);
+    // live apps can swallow a click that lands before they finish initialising: retry the entry once
+    const started = () => frame.waitForFunction(() => Boolean(window.__holoweb?.bridge.device.activeSession), null, { timeout: 8000 }).then(() => true, () => false);
+    if (!(await started())) {
+      console.log(`    (${label}: no session 8 s after entering AR, retrying the entry once)`);
+      await enter(page);
+      frame = await appFrame(page);
+    }
+    const gotResults = await frame.waitForFunction(() => window.__holoweb?.images.stats.framesWithResults > 10, null, { timeout: 15000 }).then(() => true, () => false);
+    if (!gotResults) {
+      const why = await frame.evaluate(() => {
+        const h = window.__holoweb;
+        const session = h?.bridge.device.activeSession;
+        return { stats: h?.images.stats, session: Boolean(session), features: session ? [...session.enabledFeatures] : null, visibility: session?.visibilityState, nativeFrames: h?.bridge.latest?.t ?? null };
+      }).catch((e) => String(e));
+      throw new Error(`no image results within 15 s: ${JSON.stringify(why)}`);
+    }
     const stats = await frame.evaluate(() => ({ ...window.__holoweb.images.stats, session: Boolean(window.__holoweb.bridge.device.activeSession) }));
     await writeFile(join(shotDir, `${label.split(' ')[0].toLowerCase()}-image-tracking.png`), await page.screenshot());
     if (JSON.stringify(stats.lastScores) === '[]' || stats.lastScores.includes('untrackable')) problems.push(`scores ${JSON.stringify(stats.lastScores)}`);

@@ -66,7 +66,7 @@ Test sources: **R** = `Scripts/regression.py` (on device) · **U** = `polyfill` 
 | D5 | Screen input: transient `screen` source, generic-touchscreen, select events | headless | U |
 | D6 | No camera image exposure | headless | U |
 | D7 | NotSupportedError for unsupported required features | headless | U |
-| D8 | Every WebXR interface global installed (WKWebView has none; XRRay per spec DOMPointInit defaults) | headless (e2e strips Chromium's XR* + navigator.xr) | U globals; E WebXR globals under WKWebView conditions (all 30 cases run stripped) |
+| D8 | Every WebXR interface global installed (WKWebView has none; XRRay: origin DOMPointInit w 1, direction XRRayDirectionInit z -1 w 0, TypeErrors as Chromium xr_ray.cc) | headless (e2e strips Chromium's XR* + navigator.xr) | U globals; E WebXR globals under WKWebView conditions (all 30 cases run stripped) |
 
 ## E. AR features ([specs](holoweb_plan.md))
 
@@ -122,7 +122,7 @@ Gallery (https://holoweb.app/, 15 entries; each to be opened on device):
 | G1 | SuperSplat micro PC (splat, 182 MB) | headless verified by curator; device pending |
 | G2–G6 | Needle: physics playground, snow globe, musical instrument, collaborative sandbox, diamond ring | device pending (check WebXR vs Quick Look path) |
 | G7 | PlayCanvas AR starter (iframe) | device pass (iframe support) |
-| G8 | model-viewer AR | device pending |
+| G8 | model-viewer AR | device: entered AR, then threw `Invalid direction value to construct XRRay` (fixed: XRRayDirectionInit defaults); headless pass Chromium + WebKit (E modelviewer.dev augmentedreality, default AR button in shadow root, ar-status object-placed); device recheck pending |
 | G9 | A-Frame model viewer | headless pass (offerSession fix) |
 | G10 | three.js ball shooter | device pending |
 | G11 | three.js AR lighting | device pass (= F12) |

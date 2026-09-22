@@ -25,7 +25,7 @@ describe('WebXR globals', () => {
     expect(navigator.xr).toBeInstanceOf(g.XRSystem as Ctor);
   });
 
-  it('XRRay: DOMPointInit defaults, TypeError on bad input, from an XRRigidTransform, .matrix', () => {
+  it('XRRay: XRRayDirectionInit / DOMPointInit defaults and TypeErrors as in Chromium, from an XRRigidTransform, .matrix', () => {
     const XRRay = g.XRRay as Ctor;
     const XRRigidTransform = g.XRRigidTransform as new (p?: object, o?: object) => unknown;
     const d = new XRRay();
@@ -33,9 +33,15 @@ describe('WebXR globals', () => {
     const r = new XRRay({ y: 1 }, { z: -2, w: 0 });
     expect([r.origin.x, r.origin.y, r.origin.w, r.direction.z]).toEqual([0, 1, 1, -1]);
     expect(r.matrix).toHaveLength(16);
-    expect(() => new XRRay({}, { z: -1 })).toThrow(TypeError); // direction w defaults to 1
-    expect(() => new XRRay({}, { w: 0 })).toThrow(TypeError); // zero direction
-    expect(() => new XRRay({ w: 0 })).toThrow(TypeError);
+    // device (model-viewer): a direction dictionary without w is valid, w defaults to 0 and z to -1
+    const noW = new XRRay(new DOMPoint(0, 1, 0), { x: 0, y: -2, z: 0 });
+    expect([noW.direction.x, noW.direction.y, noW.direction.z, noW.direction.w]).toEqual([0, -1, 0, 0]);
+    const noZ = new XRRay({}, { x: 1 });
+    expect(noZ.direction.x).toBeCloseTo(Math.SQRT1_2, 6);
+    expect(noZ.direction.z).toBeCloseTo(-Math.SQRT1_2, 6);
+    expect(() => new XRRay({}, { x: 0, y: 0, z: 0 })).toThrow(TypeError); // zero length
+    expect(() => new XRRay({}, new DOMPoint(0, 0, -1))).toThrow(TypeError); // DOMPoint: w 1 (Chromium too)
+    expect(() => new XRRay({ w: 0 })).toThrow(TypeError); // origin w must be 1
     const t = new XRRay(new XRRigidTransform({ x: 1, y: 2, z: 3 }));
     expect([t.origin.x, t.origin.y, t.origin.z, t.direction.z]).toEqual([1, 2, 3, -1]);
   });
