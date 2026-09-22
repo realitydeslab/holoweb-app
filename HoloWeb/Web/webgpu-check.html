@@ -1,0 +1,90 @@
+<!doctype html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+  body { margin: 0; background: transparent; color: #fff; font: 13px -apple-system, sans-serif; }
+  #row { display: flex; gap: 8px; padding: 60px 8px 8px; }
+  canvas { width: 45vw; height: 45vw; background: transparent; outline: 1px solid #fff4; }
+  pre { white-space: pre-wrap; padding: 8px; background: #0008; margin: 8px; }
+</style>
+</head>
+<body>
+<div id="row"><canvas id="gpu"></canvas><canvas id="gl"></canvas></div>
+<pre id="out"></pre>
+<script type="module">
+const out = document.getElementById("out");
+const log = (...a) => { const s = a.join(" "); console.log("[webgpu-check] " + s); out.textContent += s + "\n"; };
+
+log("userAgent", navigator.userAgent);
+log("navigator.gpu", String(!!navigator.gpu));
+log("navigator.xr", String(!!navigator.xr));
+log("createJSHandle", String(typeof window.webkit?.createJSHandle));
+
+async function webgpu() {
+  if (!navigator.gpu) return log("WebGPU: unavailable");
+  let adapter;
+  try {
+    adapter = await navigator.gpu.requestAdapter({ xrCompatible: true });
+    log("requestAdapter({xrCompatible:true})", adapter ? "ok" : "null");
+  } catch (e) { log("requestAdapter xrCompatible threw", e.message); }
+  if (!adapter) adapter = await navigator.gpu.requestAdapter();
+  if (!adapter) return log("WebGPU: no adapter");
+  const info = adapter.info || {};
+  log("adapter.info", JSON.stringify({ vendor: info.vendor, architecture: info.architecture, device: info.device, description: info.description }));
+  log("features", [...adapter.features].sort().join(","));
+  const L = adapter.limits;
+  log("limits", JSON.stringify({ maxTextureDimension2D: L.maxTextureDimension2D, maxTextureArrayLayers: L.maxTextureArrayLayers, maxBufferSize: L.maxBufferSize, maxComputeWorkgroupSizeX: L.maxComputeWorkgroupSizeX }));
+  const format = navigator.gpu.getPreferredCanvasFormat();
+  log("preferredCanvasFormat", format);
+  const device = await adapter.requestDevice();
+  const canvas = document.getElementById("gpu");
+  canvas.width = canvas.clientWidth * devicePixelRatio; canvas.height = canvas.clientHeight * devicePixelRatio;
+  const ctx = canvas.getContext("webgpu");
+  // COPY_DST is what an XRGPUBinding polyfill needs to blit eye layers into the canvas.
+  let usage = GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_DST;
+  try { ctx.configure({ device, format, alphaMode: "premultiplied", usage }); log("canvas configure COPY_DST", "ok"); }
+  catch (e) { log("canvas configure COPY_DST failed", e.message); usage = GPUTextureUsage.RENDER_ATTACHMENT; ctx.configure({ device, format, alphaMode: "premultiplied", usage }); }
+  const mod = device.createShaderModule({ code: `
+    @vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
+      var p = array<vec2f,3>(vec2f(0,.7), vec2f(-.7,-.7), vec2f(.7,-.7)); return vec4f(p[i],0,1); }
+    @fragment fn fs() -> @location(0) vec4f { return vec4f(0,.8,1,1); }` });
+  const pipe = device.createRenderPipeline({ layout: "auto", vertex: { module: mod, entryPoint: "vs" }, fragment: { module: mod, entryPoint: "fs", targets: [{ format }] } });
+  // Render into an offscreen 2-layer texture, then copy layer 0 into the canvas: exercises the exact XRGPUBinding presenter path.
+  const layers = device.createTexture({ size: [canvas.width, canvas.height, 2], format, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC | GPUTextureUsage.TEXTURE_BINDING });
+  const enc = device.createCommandEncoder();
+  const pass = enc.beginRenderPass({ colorAttachments: [{ view: layers.createView({ dimension: "2d", baseArrayLayer: 0, arrayLayerCount: 1 }), loadOp: "clear", clearValue: [0,0,0,0], storeOp: "store" }] });
+  pass.setPipeline(pipe); pass.draw(3); pass.end();
+  let path = "direct";
+  if (usage & GPUTextureUsage.COPY_DST) {
+    enc.copyTextureToTexture({ texture: layers, origin: [0,0,0] }, { texture: ctx.getCurrentTexture() }, [canvas.width, canvas.height, 1]);
+    path = "layer->canvas copy";
+  }
+  device.queue.submit([enc.finish()]);
+  device.addEventListener?.("uncapturederror", e => log("GPU error", e.error.message));
+  await device.queue.onSubmittedWorkDone();
+  log("WebGPU triangle drawn via", path);
+}
+
+function webgl2() {
+  const c = document.getElementById("gl");
+  c.width = c.clientWidth * devicePixelRatio; c.height = c.clientHeight * devicePixelRatio;
+  const gl = c.getContext("webgl2", { alpha: true, premultipliedAlpha: true, xrCompatible: true });
+  if (!gl) return log("WebGL2: unavailable");
+  log("WebGL2 renderer", gl.getParameter(gl.RENDERER), "multiview", String(!!gl.getExtension("OVR_multiview2")));
+  const sh = (t, s) => { const x = gl.createShader(t); gl.shaderSource(x, s); gl.compileShader(x); return x; };
+  const p = gl.createProgram();
+  gl.attachShader(p, sh(gl.VERTEX_SHADER, `#version 300 es
+    void main(){ vec2 v[3]=vec2[3](vec2(0,.7),vec2(-.7,-.7),vec2(.7,-.7)); gl_Position=vec4(v[gl_VertexID],0,1);} `));
+  gl.attachShader(p, sh(gl.FRAGMENT_SHADER, `#version 300 es
+    precision mediump float; out vec4 o; void main(){ o=vec4(1,.5,0,1);} `));
+  gl.linkProgram(p); gl.useProgram(p);
+  gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT); gl.drawArrays(gl.TRIANGLES, 0, 3);
+  log("WebGL2 triangle drawn");
+}
+
+webgl2();
+webgpu().catch(e => log("WebGPU error", e.message));
+</script>
+</body>
+</html>

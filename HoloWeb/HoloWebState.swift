@@ -60,7 +60,16 @@ final class HoloWebState: NSObject {
 
     func load(_ url: URL) {
         self.url = url
-        webView.load(URLRequest(url: url))
+        if url.isFileURL {
+            webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        } else {
+            webView.load(URLRequest(url: url))
+        }
+    }
+
+    /// Resolves a page bundled under `Web/` (debug pages such as `webgpu-check.html`).
+    static func bundledPage(_ name: String) -> URL? {
+        Bundle.main.url(forResource: name, withExtension: nil, subdirectory: "Web")
     }
 
     func reload() {

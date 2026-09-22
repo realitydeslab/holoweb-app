@@ -53,3 +53,21 @@ Eye poses: centerEye = cameraPose * T(CameraOffset + MrOffset); left = centerEye
 
 ### XRGPUBinding polyfill feasibility (three.js dev XRManager.js, checked 2026-09-22)
 three.js WebGPU-backend XR path needs only: `globalThis.XRGPUBinding` constructor `(session, GPUDevice)`; `getPreferredColorFormat()`; `createProjectionLayer({colorFormat})` returning `{textureWidth, textureHeight, textureArrayLength, ignoreDepthValues}`; `session.updateRenderState({layers:[layer]})`; per frame `getViewSubImage(layer, view)` returning `{colorTexture: GPUTexture, viewport, getViewDescriptor() -> {dimension:'2d', baseArrayLayer, arrayLayerCount:1}}`; and `session.enabledFeatures` must include `'webgpu'` (else it throws). It allocates its own depth (RenderTarget depth:2, useArrayDepthTexture). All of this is plain JS over a GPUDevice the page created, so a polyfill can implement it: allocate a 2-layer `GPUTexture` (RENDER_ATTACHMENT | TEXTURE_BINDING | COPY_SRC) sized to the eye viewport, and after the app's rAF callback issue `copyTextureToTexture` from each layer into the polyfill canvas's `GPUCanvasContext.getCurrentTexture()` (configured with COPY_DST | RENDER_ATTACHMENT, alphaMode 'premultiplied') at the mono/HoloKit viewport rects, then `queue.submit`. No shader needed. Est. 200-300 lines TS. Unknowns to test on device: WebKit accepting `xrCompatible` in requestAdapter (unknown dict members are ignored per WebIDL), and copy-to-canvas-texture usage support.
+
+## Native execution log (M0-M3)
+
+### M0 (2026-09-22) — device: Holo iPhone 15 I, iPhone16,1, iOS 27.0
+- `xcodebuild -scheme HoloWeb -destination id=00008130-000848EA38298D3A build` -> BUILD SUCCEEDED (App Clip embedded). Required `xcodebuild -downloadComponent MetalToolchain` (838.9 MB, Xcode 27 ships without it).
+- Installed + launched via devicectl; https://holoweb.app/test2/ (Unity 6000.0.17f1 WebGL) loads, page console forwarded as `[web]` lines. Visual overlay not machine-verified (no screenshot tool); needs a human glance.
+- Commit 058c9eb.
+
+### M1 WebGPU check (HoloWeb/Web/webgpu-check.html, launched with HOLOWEB_PAGE=webgpu-check.html)
+- navigator.gpu: true. navigator.xr: false. window.webkit.createJSHandle: undefined (preference not yet enabled; M3).
+- requestAdapter({xrCompatible:true}) accepted (unknown member ignored).
+- adapter.info: vendor/architecture/device/description all "apple" (privacy-bucketed).
+- features include clip-distances, shader-f16, float32-filterable, timestamp-query, texture-formats-tier2, primitive-index.
+- limits: maxTextureDimension2D 16384, maxTextureArrayLayers 2048, maxBufferSize 1 GiB, maxComputeWorkgroupSizeX 1024.
+- preferredCanvasFormat: bgra8unorm.
+- Canvas configure with usage RENDER_ATTACHMENT|COPY_DST and alphaMode premultiplied: OK. Rendered into layer 0 of a 2-layer texture and copyTextureToTexture into the canvas: OK. -> XRGPUBinding presenter design is confirmed viable on device.
+- WebGL2: works; OVR_multiview2: not exposed (so three.js WebGL XR will not use multiview).
+- UA string reports "iPhone OS 18_7" (WebKit UA freeze), so pages must not sniff the iOS version from UA.

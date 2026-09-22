@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		96B0000000000000000000B2 /* Web in Resources */ = {isa = PBXBuildFile; fileRef = 96B0000000000000000000B1 /* Web */; };
+		96B0000000000000000000B3 /* Web in Resources */ = {isa = PBXBuildFile; fileRef = 96B0000000000000000000B1 /* Web */; };
 		96B0000000000000000000A2 /* HoloWebLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96B0000000000000000000A1 /* HoloWebLink.swift */; };
 		96B0000000000000000000A3 /* HoloWebLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96B0000000000000000000A1 /* HoloWebLink.swift */; };
 		4B1E355E2A7A21A9003EBC46 /* HoloWebState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B1E355D2A7A21A9003EBC46 /* HoloWebState.swift */; };
@@ -57,6 +59,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		96B0000000000000000000B1 /* Web */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Web; sourceTree = "<group>"; };
 		96B0000000000000000000A1 /* HoloWebLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoloWebLink.swift; sourceTree = "<group>"; };
 		4B1E355A2A7A21A9003EBC46 /* HoloWeb.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HoloWeb.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4B1E355D2A7A21A9003EBC46 /* HoloWebState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoloWebState.swift; sourceTree = "<group>"; };
@@ -116,6 +119,7 @@
 			isa = PBXGroup;
 			children = (
 				96A613662E06442500249893 /* test.html */,
+				96B0000000000000000000B1 /* Web */,
 				96ACF3992E025144006DF723 /* HoloWeb-Bridging-Header.h */,
 				96ACF3802E023AE4006DF723 /* Shaders.metal */,
 				96ACF3822E023AE4006DF723 /* ShaderTypes.h */,
@@ -227,6 +231,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				96A613672E06442A00249893 /* test.html in Resources */,
+				96B0000000000000000000B2 /* Web in Resources */,
 				4B1E35652A7A21AB003EBC46 /* Preview Assets.xcassets in Resources */,
 				4B1E35622A7A21AB003EBC46 /* Assets.xcassets in Resources */,
 			);
@@ -237,6 +242,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				96A613682E06442A00249893 /* test.html in Resources */,
+				96B0000000000000000000B3 /* Web in Resources */,
 				9602D09C2CE97F4600F2820D /* Assets.xcassets in Resources */,
 				9602D09D2CE97F4600F2820D /* Preview Assets.xcassets in Resources */,
 			);
