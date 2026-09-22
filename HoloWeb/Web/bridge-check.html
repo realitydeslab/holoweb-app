@@ -8,6 +8,8 @@
 const out = document.getElementById("out");
 const log = (...a) => { const s = a.join(" "); console.log("[bridge-check] " + s); out.textContent += s + "\n"; };
 const native = (msg) => window.webkit.messageHandlers.holoweb.postMessage(msg);
+// Machine-readable results for Scripts/regression.sh: "[check] PASS|FAIL <name> <detail>".
+const check = (name, ok, detail = "") => console.log(`[check] ${ok ? "PASS" : "FAIL"} ${name} ${detail}`);
 
 let anchorUpdates = [], frames = 0, first = null, last = null, planes = 0, argsSeen = null, lat = [];
 const bridge = {
@@ -27,6 +29,8 @@ window.__holoweb = bridge;  // fallback target
   const handle = hasHandle ? window.webkit.createJSHandle(bridge) : null;
   const ready = await native({ type: "ready", bridge: handle });
   log("ready reply:", JSON.stringify(ready));
+  check("bridge.jshandle", ready.transport === "jshandle", ready.transport);
+  check("bridge.device-info", !!ready.device?.model && ready.device.screenWidthPx > 0, ready.device?.model);
   const session = await native({ type: "requestSession", mode: "immersive-ar", features: ["local", "hit-test"] });
   log("requestSession reply:", JSON.stringify(session));
 
@@ -35,11 +39,15 @@ window.__holoweb = bridge;  // fallback target
   await new Promise(r => setTimeout(r, 2000));
   const rate = (frames - f0) / ((performance.now() - t0) / 1000);
   log("onFrame calls/sec:", rate.toFixed(1));
+  check("bridge.frame-rate", rate >= 55, rate.toFixed(1) + "/s (>=55)");
   const L = lat.slice(-120).sort((a, b) => a - b);
   log("one-way latency ms p50/p90/max:", L[L.length >> 1].toFixed(1), L[Math.floor(L.length * 0.9)].toFixed(1), L[L.length - 1].toFixed(1));
+  check("bridge.latency-p50", L[L.length >> 1] < 5, L[L.length >> 1].toFixed(1) + " ms (<5)");
   let raf = 0; const r0 = performance.now();
   await new Promise(done => { const tick = () => { raf++; if (last) native({ type: "rendered", t: last.t }); performance.now() - r0 < 2000 ? requestAnimationFrame(tick) : done(); }; requestAnimationFrame(tick); });
   log("requestAnimationFrame Hz:", (raf / 2).toFixed(1), "(sent 'rendered' each tick)");
+  check("bridge.raf-rate", raf / 2 >= 55, (raf / 2).toFixed(1) + " Hz (>=55)");
+  check("bridge.frame-args", argsSeen.tIsNumber && argsSeen.transformLen === 16 && argsSeen.projLen === 16 && typeof argsSeen.orientation === "string", JSON.stringify(argsSeen).slice(0, 80));
   log("first frame args:", JSON.stringify(argsSeen));
   const p0 = first.transform.slice(12, 15).map(v => v.toFixed(3)), p1 = last.transform.slice(12, 15).map(v => v.toFixed(3));
   log("camera position first:", p0.join(","), "latest:", p1.join(","), "tracking:", last.tracking);
@@ -51,19 +59,36 @@ window.__holoweb = bridge;  // fallback target
   const hit = await native({ type: "hitTest", origin, direction: dir });
   log("hitTest round trip ms:", (performance.now() - h0).toFixed(1), "hits:", hit.hits.length, hit.hits[0] ? "type " + hit.hits[0].type + " at " + hit.hits[0].pose.slice(12, 15).map(v => v.toFixed(2)).join(",") : "");
   log("planes received:", planes);
+  check("bridge.hit-test-reply", Array.isArray(hit.hits), hit.hits.length + " hits");
+  const nan = await native({ type: "hitTest", origin: [NaN, 0, 0], direction: [0, 0, -1] });
+  check("bridge.hit-test-rejects-nan", nan.hits.length === 0);
 
   const pose = last.transform.slice(); pose[14] -= 0.5;
   const created = await native({ type: "createAnchor", pose });
   await new Promise(r => setTimeout(r, 400));
   const seen = anchorUpdates.flat().find(a => a.id === created.id);
   log("createAnchor id:", created.id, "onAnchors delivered:", String(!!seen), seen && seen.transform ? "z=" + seen.transform[14].toFixed(3) + " (requested " + pose[14].toFixed(3) + ")" : "");
+  check("bridge.anchor-roundtrip", !!seen && Math.abs(seen.transform[14] - pose[14]) < 0.01, seen ? "z=" + seen.transform[14].toFixed(3) : "not delivered");
+  const badAnchor = await native({ type: "createAnchor", pose: pose.map(() => Infinity) }).then(() => "resolved", () => "rejected");
+  check("bridge.anchor-rejects-nonfinite", badAnchor === "rejected");
   await native({ type: "deleteAnchor", id: created.id });
+  // Iframes share the page world but must be refused by the bridge.
+  const iframeResult = await new Promise(resolve => {
+    const f = document.createElement("iframe");
+    window.addEventListener("message", e => { if (e.data?.iframeBridge) resolve(e.data.iframeBridge); }, { once: true });
+    f.srcdoc = `<script>window.webkit.messageHandlers.holoweb.postMessage({type:"setMode",mode:"stereo"}).then(()=>parent.postMessage({iframeBridge:"resolved"},"*"),e=>parent.postMessage({iframeBridge:"rejected: "+e.message},"*"))<\/script>`;
+    document.body.appendChild(f);
+    setTimeout(() => resolve("timeout"), 2000);
+  });
+  check("bridge.iframe-rejected", iframeResult.startsWith("rejected"), iframeResult);
   const bad = await native({ type: "bogus" }).then(() => "resolved", e => "rejected: " + e.message);
   log("unknown type:", bad);
+  check("bridge.unknown-type-rejected", bad.startsWith("rejected"));
   await native({ type: "endSession" });
   const fEnd = frames; await new Promise(r => setTimeout(r, 500));
   log("frames after endSession:", frames - fEnd);
+  check("bridge.end-session-stops-frames", frames - fEnd === 0, String(frames - fEnd));
   log("DONE");
-})().catch(e => log("ERROR", e.message));
+})().catch(e => { log("ERROR", e.message); check("bridge.script", false, e.message); });
 </script>
 </body></html>

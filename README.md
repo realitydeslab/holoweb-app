@@ -19,3 +19,13 @@ While Safari on visionOS 2 (Apple Vision Pro) supports WebXR for VR experiences,
 For iOS, WebXR support is primarily available through [Mozilla's WebXR Viewer app](https://github.com/mozilla-mobile/webxr-ios/), which hasn't been updated in several years.
 
 ## Motivation
+
+## Regression tests
+
+```bash
+Scripts/regression.py                 # polyfill tests + Xcode builds + on-device checks (if an iOS 27 iPhone is connected)
+Scripts/regression.py --no-device     # polyfill tests + builds only
+Scripts/regression.py --device <UDID> # choose the phone
+```
+
+On-device checks run bundled pages (`HoloWeb/Web/webgpu-check.html`, `bridge-check.html`, `xr-anchor-check.html`) and the three.js examples with the debug mono/stereo toggle, and fail on: bridge < 55 frames/s, XR < 55 fps, view count not following the mode, page errors, iframe access to the bridge, non-finite input accepted, frames after endSession, anchor round-trip errors, missing link interception.

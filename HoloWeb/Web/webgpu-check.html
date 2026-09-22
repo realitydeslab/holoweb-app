@@ -15,6 +15,10 @@
 <script type="module">
 const out = document.getElementById("out");
 const log = (...a) => { const s = a.join(" "); console.log("[webgpu-check] " + s); out.textContent += s + "\n"; };
+const check = (name, ok, detail = "") => console.log(`[check] ${ok ? "PASS" : "FAIL"} ${name} ${detail}`);
+check("webgpu.navigator-gpu", !!navigator.gpu);
+check("webxr.navigator-xr", !!navigator.xr);
+check("webkit.create-js-handle", typeof window.webkit?.createJSHandle === "function");
 
 log("userAgent", navigator.userAgent);
 log("navigator.gpu", String(!!navigator.gpu));
@@ -64,6 +68,7 @@ async function webgpu() {
   device.addEventListener?.("uncapturederror", e => log("GPU error", e.error.message));
   await device.queue.onSubmittedWorkDone();
   log("WebGPU triangle drawn via", path);
+  check("webgpu.copy-to-canvas-presenter", path === "layer->canvas copy", path);
 }
 
 function webgl2() {
@@ -81,10 +86,11 @@ function webgl2() {
   gl.linkProgram(p); gl.useProgram(p);
   gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT); gl.drawArrays(gl.TRIANGLES, 0, 3);
   log("WebGL2 triangle drawn");
+  check("webgl2.draw", gl.getError() === gl.NO_ERROR);
 }
 
 webgl2();
-webgpu().catch(e => log("WebGPU error", e.message));
+webgpu().catch(e => { log("WebGPU error", e.message); check("webgpu.script", false, e.message); });
 </script>
 </body>
 </html>

@@ -3,6 +3,8 @@
 <script>
 // Exercises the WebXR Anchors API end to end through the polyfill and native ARKit anchors.
 const log = (...a) => console.log("[anchor-check] " + a.join(" "));
+const check = (name, ok, detail = "") => console.log(`[check] ${ok ? "PASS" : "FAIL"} ${name} ${detail}`);
+let trackedZ = null;
 (async () => {
   const canvas = document.createElement("canvas"); document.body.appendChild(canvas);
   const gl = canvas.getContext("webgl2", { xrCompatible: true, alpha: true });
@@ -20,6 +22,7 @@ const log = (...a) => console.log("[anchor-check] " + a.join(" "));
     if (anchor && frame.trackedAnchors.has(anchor) && frames % 30 === 0) {
       const p = frame.getPose(anchor.anchorSpace, local);
       log("tracked:", frame.trackedAnchors.size, "pose z:", p ? p.transform.position.z.toFixed(3) : "null");
+      if (p) trackedZ = p.transform.position.z;
     }
     if (frames === 150) {
       anchor?.delete();
@@ -27,10 +30,13 @@ const log = (...a) => console.log("[anchor-check] " + a.join(" "));
     }
     if (frames === 180) {
       log("after delete trackedAnchors:", frame.trackedAnchors.size);
+      check("xr.anchor-created", !!anchor);
+      check("xr.anchor-tracked-pose", trackedZ !== null && Math.abs(trackedZ + 1) < 0.01, trackedZ === null ? "never tracked" : "z=" + trackedZ.toFixed(3));
+      check("xr.anchor-deleted", frame.trackedAnchors.size === 0, String(frame.trackedAnchors.size));
       session.end().then(() => log("DONE"));
       return;
     }
     session.requestAnimationFrame(onFrame);
   });
-})().catch(e => log("ERROR", e.message));
+})().catch(e => { log("ERROR", e.message); check("xr.anchor-script", false, e.message); });
 </script></body></html>
