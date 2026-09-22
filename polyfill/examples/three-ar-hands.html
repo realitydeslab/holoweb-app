@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <title>HoloWeb AR hand tracking</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+      #info { position: absolute; top: 8px; width: 100%; text-align: center; font: 13px system-ui; color: #fff; text-shadow: 0 0 3px #000; }
+    </style>
+    <!-- In the app this is injected at document start; loading it first here does the same. -->
+    <script src="../dist/holoweb-polyfill.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.webgpu.js",
+          "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.webgpu.js",
+          "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.tsl.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="info">HoloWeb &middot; hand tracking (Vision + LiDAR) &middot; pinch to drop a cube</div>
+    <script type="module">
+      // WebXR Hand Input: three.js' own hand models read the 25 joints; pinching (select from a hand
+      // input source) drops a cube at the index fingertip. ?backend=webgl forces the WebGL2 backend.
+      import * as THREE from 'three/webgpu';
+      import { ARButton } from 'three/addons/webxr/ARButton.js';
+      import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
+
+      const params = new URLSearchParams(location.search);
+      const status = (window.__handStatus = { backend: '', xrFrames: 0, hands: 0, joints: 0, handSelects: 0, cubes: 0, errors: [] });
+      addEventListener('error', (e) => status.errors.push(String(e.message)));
+      addEventListener('unhandledrejection', (e) => status.errors.push(String(e.reason)));
+
+      const renderer = new THREE.WebGPURenderer({ antialias: true, alpha: true, forceWebGL: params.get('backend') === 'webgl' });
+      renderer.setPixelRatio(devicePixelRatio);
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.xr.enabled = true;
+      document.body.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.01, 20);
+      scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 3));
+
+      const factory = new XRHandModelFactory();
+      const hands = [0, 1].map((i) => {
+        const hand = renderer.xr.getHand(i);
+        hand.add(factory.createHandModel(hand, 'spheres'));
+        scene.add(hand);
+        return hand;
+      });
+
+      const cube = new THREE.BoxGeometry(0.03, 0.03, 0.03);
+      function dropCube(inputSource) {
+        const hand = hands.find((h) => h.userData.inputSource === inputSource) ?? hands[0];
+        const tip = hand.joints?.['index-finger-tip'];
+        if (!tip) return;
+        const mesh = new THREE.Mesh(cube, new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(Math.random(), 0.8, 0.5) }));
+        tip.getWorldPosition(mesh.position);
+        scene.add(mesh);
+        status.cubes++;
+      }
+      hands.forEach((hand) => hand.addEventListener('connected', (e) => (hand.userData.inputSource = e.data)));
+
+      document.body.appendChild(ARButton.createButton(renderer, { optionalFeatures: ['hand-tracking', 'webgpu'] }));
+      renderer.xr.addEventListener('sessionstart', () => {
+        const session = renderer.xr.getSession();
+        status.backend = renderer.backend.isWebGPUBackend ? 'webgpu' : 'webgl';
+        session.addEventListener('select', (e) => {
+          if (!e.inputSource.hand) return;
+          status.handSelects++;
+          dropCube(e.inputSource);
+        });
+      });
+
+      renderer.setAnimationLoop((time, frame) => {
+        if (frame) {
+          status.xrFrames++;
+          const session = renderer.xr.getSession();
+          const handSources = [...session.inputSources].filter((s) => s.hand);
+          status.hands = handSources.length;
+          const ref = renderer.xr.getReferenceSpace();
+          status.joints = handSources.length ? [...handSources[0].hand.values()].filter((j) => frame.getJointPose(j, ref)).length : 0;
+        }
+        renderer.render(scene, camera);
+      });
+
+      addEventListener('resize', () => {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+      });
+    </script>
+  </body>
+</html>

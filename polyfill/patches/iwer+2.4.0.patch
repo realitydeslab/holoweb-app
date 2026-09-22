@@ -148,7 +148,7 @@ index eafdd9e..f99b672 100644
          const rotation = mat4.create();
          if (cosAngle > -1 && cosAngle < 1) {
 diff --git a/node_modules/iwer/lib/session/XRRenderState.d.ts b/node_modules/iwer/lib/session/XRRenderState.d.ts
-index cb77fb2..b14f9d1 100644
+index cb77fb2..84c86a2 100644
 --- a/node_modules/iwer/lib/session/XRRenderState.d.ts
 +++ b/node_modules/iwer/lib/session/XRRenderState.d.ts
 @@ -5,24 +5,27 @@
@@ -170,7 +170,7 @@ index cb77fb2..b14f9d1 100644
      get depthFar(): number;
      get inlineVerticalFieldOfView(): number | null;
      get baseLayer(): XRWebGLLayer | null;
-+    get layers(): XRLayer[];
++    get layers(): XRLayer[] | undefined;
  }
  export interface XRRenderStateInit {
      depthNear?: number;
@@ -182,7 +182,7 @@ index cb77fb2..b14f9d1 100644
  //# sourceMappingURL=XRRenderState.d.ts.map
 \ No newline at end of file
 diff --git a/node_modules/iwer/lib/session/XRRenderState.js b/node_modules/iwer/lib/session/XRRenderState.js
-index 80a3bc7..eb95e38 100644
+index 80a3bc7..2f90f01 100644
 --- a/node_modules/iwer/lib/session/XRRenderState.js
 +++ b/node_modules/iwer/lib/session/XRRenderState.js
 @@ -14,7 +14,9 @@ export class XRRenderState {
@@ -191,24 +191,25 @@ index 80a3bc7..eb95e38 100644
              inlineVerticalFieldOfView: (_f = (_e = init.inlineVerticalFieldOfView) !== null && _e !== void 0 ? _e : oldState === null || oldState === void 0 ? void 0 : oldState.inlineVerticalFieldOfView) !== null && _f !== void 0 ? _f : null,
 -            baseLayer: (_h = (_g = init.baseLayer) !== null && _g !== void 0 ? _g : oldState === null || oldState === void 0 ? void 0 : oldState.baseLayer) !== null && _h !== void 0 ? _h : null,
 +            // HOLOWEB: WebXR Layers support (XRGPUBinding projection layers)
-+            layers: init.layers !== undefined ? Array.from(init.layers) : init.baseLayer ? [] : oldState === null || oldState === void 0 ? void 0 : oldState.layers,
++            layers: init.layers !== undefined ? Array.from(init.layers) : init.baseLayer ? undefined : oldState === null || oldState === void 0 ? void 0 : oldState.layers,
 +            baseLayer: init.layers !== undefined ? null : (_h = (_g = init.baseLayer) !== null && _g !== void 0 ? _g : oldState === null || oldState === void 0 ? void 0 : oldState.baseLayer) !== null && _h !== void 0 ? _h : null,
          };
      }
      get depthNear() {
-@@ -29,5 +31,9 @@ export class XRRenderState {
+@@ -29,5 +31,10 @@ export class XRRenderState {
      get baseLayer() {
          return this[P_RENDER_STATE].baseLayer;
      }
++    // HOLOWEB: undefined until a page sets layers (XRGPUBinding). three.js r130-r173 take the
++    // WebXR Layers path whenever this is defined, and WebGL XRWebGLBinding has no createProjectionLayer.
 +    get layers() {
-+        var _a;
-+        return (_a = this[P_RENDER_STATE].layers) !== null && _a !== void 0 ? _a : [];
++        return this[P_RENDER_STATE].layers;
 +    }
  }
  //# sourceMappingURL=XRRenderState.js.map
 \ No newline at end of file
 diff --git a/node_modules/iwer/lib/session/XRSession.js b/node_modules/iwer/lib/session/XRSession.js
-index de7bbb7..65ca617 100644
+index de7bbb7..c067d35 100644
 --- a/node_modules/iwer/lib/session/XRSession.js
 +++ b/node_modules/iwer/lib/session/XRSession.js
 @@ -20,6 +20,18 @@ import { XREye } from '../views/XRView.js';
@@ -237,7 +238,7 @@ index de7bbb7..65ca617 100644
 -                if (baseLayer === null) {
 +                // HOLOWEB: a session rendering through renderState.layers has no baseLayer
 +                const layers = this[P_SESSION].renderState.layers;
-+                if (baseLayer === null && layers.length === 0) {
++                if (baseLayer === null && !(layers && layers.length > 0)) {
                      return;
                  }
 -                const context = baseLayer.context;

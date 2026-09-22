@@ -2,7 +2,7 @@
  * HoloKit XRDevice: IWER device config for an iPhone running ARKit, used in both
  * mono (handheld AR) and stereo (HoloKit X headset) modes.
  */
-import { P_DEVICE, P_SESSION, XRDevice, XRSession, XRWebGLLayer } from 'iwer';
+import { P_DEVICE, P_SESSION, P_WEBGL_LAYER, XRDevice, XRSession, XRWebGLLayer } from 'iwer';
 import type { XRDeviceConfig, WebXRFeature } from 'iwer/lib/device/XRDevice.js';
 import { XREnvironmentBlendMode, XRInteractionMode } from 'iwer/lib/session/XRSession.js';
 
@@ -16,18 +16,24 @@ export const HOLOKIT_FEATURES: WebXRFeature[] = [
   'light-estimation',
   'anchors',
   'webgpu',
+  'hand-tracking',
+  'plane-detection',
 ];
 
 export function createHoloKitDeviceConfig(userAgent: string): XRDeviceConfig {
   return {
     name: 'HoloKit',
     controllerConfig: undefined,
-    supportedSessionModes: ['inline', 'immersive-ar'],
+    // immersive-vr: opaque rendering, native draws black instead of the camera (product decision).
+    supportedSessionModes: ['inline', 'immersive-ar', 'immersive-vr'],
     supportedFeatures: HOLOKIT_FEATURES,
     supportedFrameRates: [60],
     isSystemKeyboardSupported: false,
     internalNominalFrameRate: 60,
-    environmentBlendModes: { 'immersive-ar': XREnvironmentBlendMode.AlphaBlend },
+    environmentBlendModes: {
+      'immersive-ar': XREnvironmentBlendMode.AlphaBlend,
+      'immersive-vr': XREnvironmentBlendMode.Opaque,
+    },
     interactionMode: XRInteractionMode.ScreenSpace,
     // IWER overwrites navigator.userAgent with this value, so keep the real one.
     userAgent,
@@ -60,6 +66,9 @@ function installNativeResolution(device: XRDevice): void {
   let savedStyle: { canvas: HTMLCanvasElement; width: string; height: string } | null = null;
 
   state.onBaseLayerSet = (baseLayer) => {
+    // Inline sessions render into the page's canvas where the page put it: IWER would move it into
+    // its fixed z-index 999 container, covering the page (and its Enter button).
+    if (baseLayer && baseLayer[P_WEBGL_LAYER].session[P_SESSION].mode === 'inline') return;
     baseLayerSet(baseLayer);
     if (!baseLayer) return;
     const canvas = baseLayer.context.canvas;
@@ -75,12 +84,26 @@ function installNativeResolution(device: XRDevice): void {
   };
 
   state.onSessionEnd = () => {
+    // IWER calls this device-global hook for every session; only an immersive session owns the canvas.
+    if (endingInline) return;
     if (savedStyle) {
       savedStyle.canvas.style.width = savedStyle.width;
       savedStyle.canvas.style.height = savedStyle.height;
       savedStyle = null;
     }
     sessionEnd();
+  };
+
+  const end = XRSession.prototype.end;
+  let endingInline = false;
+  XRSession.prototype.end = function (this: XRSession) {
+    // XRSession.end runs onSessionEnd synchronously inside its promise executor
+    endingInline = this[P_SESSION].mode === 'inline';
+    try {
+      return end.call(this);
+    } finally {
+      endingInline = false;
+    }
   };
 
   Object.defineProperty(XRWebGLLayer, 'getNativeFramebufferScaleFactor', {

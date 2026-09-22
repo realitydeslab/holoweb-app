@@ -17,7 +17,9 @@ npm run build        # dist/*.js, fails if > 250 KB or if IWER remote/native cod
 npm test             # vitest: stereo golden values, bridge + session behaviour (happy-dom)
 npm run typecheck    # tsc --noEmit, strict
 npm run test:e2e     # headless Chromium against mock-native: examples in mono/stereo, native toggles, rotation,
-                     # demo.html, stale-right-eye fixture on three r111 (HOLOWEB_E2E_TOJI=1 adds the live Toji page)
+                     # demo.html, stale-right-eye fixture (three r111), hands, three.js r186 official AR examples
+                     # (fixtures; HOLOWEB_E2E_LIVE=1 = threejs.org), same-origin iframe, A-Frame 1.8 (network)
+                     # HOLOWEB_E2E_TOJI=1 adds the live Toji page
 ```
 
 Desktop development: open `examples/three-ar.html` (WebGL2 backend) or
@@ -39,11 +41,15 @@ and `?holoweb-model=iPhone17,1` override the mock.
 | `src/anchors.ts` | `createAnchor` / `deleteAnchor` / `onAnchors` behind IWER's `XRAnchor` |
 | `src/light.ts` | `requestLightProbe` / `getLightEstimate` from ARKit ambient lux + kelvin |
 | `src/floor.ts` | `local-floor` height from planes, `reset` event when it moves > 2 cm |
-| `src/hittest.ts` | Ray vs ARKit planes, plugged into IWER's hit-test plumbing as its environment module |
+| `src/hittest.ts` | Ray vs ARKit plane polygons, plugged into IWER's hit-test plumbing as its environment module |
+| `src/hittest-transient.ts` | `requestHitTestSourceForTransientInput` / `getHitTestResultsForTransientInput` (screen taps) |
+| `src/planes.ts` | `plane-detection`: `frame.detectedPlanes` with stable `XRPlane` objects per native id |
+| `src/reflection.ts` | `XRWebGLBinding.getReflectionCubeMap` from `onEnvironment`, `reflectionchange` |
 | `src/input.ts` | Screen tap -> transient `screen` (mono) / `gaze` (stereo) input source, `select` events |
 | `src/webgl-layer.ts` | Non-null opaque `XRWebGLLayer.framebuffer` + fixed framebuffer size |
 | `src/gpu-binding.ts`, `src/gpu-presenter.ts` | `XRGPUBinding`, projection layer, copy-to-canvas presenter |
-| `src/mock-native.ts` | Desktop stand-in for the iOS app |
+| `src/hands.ts`, `src/hand-input.ts` | WebXR Hand Input from native Vision + LiDAR joints (`onHands`), pinch -> select |
+| `src/mock-native.ts`, `src/mock-hands.ts` | Desktop stand-in for the iOS app (incl. a synthetic pinching hand) |
 | `src/webkit.ts` | Typed `window.webkit` shim (the only untyped boundary) |
 
 ## Why patch-package over vendoring IWER
@@ -115,8 +121,10 @@ the device config. The config sets `userAgent` to the real UA, because IWER over
   session keeps running on both backends. Within a session the reported view count never drops below the
   maximum the page has seen (`src/views.ts`): a session that has only been mono has one view; mono after stereo
   reports `[mono view, inert right view]`. The inert view has the mono pose (three's union frustum = mono), a
-  zero-area WebGL viewport and a projection pushed far below the viewport (P[9] = 1e4), so it rasterises nothing
-  in any engine; presenters ignore it. Reason: engines keep per-view state sized by the largest view count.
+  true 0x0 viewport (`XRWebGLLayer.getViewport` and `XRGPUSubImage.viewport`, so pages that skip empty viewports
+  skip it) and a projection pushed far below the viewport (P[9] = 1e4), so it rasterises nothing even in engines
+  that draw it anyway; presenters ignore it. `examples/ar-scene.js` `?stats` reports both `views` (reported
+  views) and `activeViews` (views with a non-zero XRViewport). Reason: engines keep per-view state sized by the largest view count.
   three.js <= r111 WebXRManager renders a fixed `[cameraL, cameraR]` ArrayCamera and updates only `cameras[i]`
   for `i < views.length`, so a 2 -> 1 drop left the stale right eye rendering every frame
   (toji.github.io/webxr-particles, r111dev). Babylon / A-Frame / PlayCanvas may assume the same.
@@ -133,6 +141,56 @@ the device config. The config sets `userAgent` to the real UA, because IWER over
 - Hit test: `PlaneEnvironment` implements IWER's SEM interface, so `requestHitTestSource` and
   `getHitTestResults` run in-frame against the latest `onPlanes` set with zero IPC. Native raycast is
   available as `__holoweb.hitTest(origin, dir)`, which costs one message round trip (about 1 frame).
+
+## Planes, reflections, frames, engines
+
+- `plane-detection`: every frame of a session with the feature gets all live ARKit planes in `frame.detectedPlanes`.
+  Each is one IWER `XRPlane` per native id, reused while the plane lives (three.js' `XRPlanes` keys meshes by the
+  object). `planeSpace` is the plane transform (+Y = normal); `polygon` is `DOMPointReadOnly[]` from native
+  `polygon` (else the extent rectangle); `orientation`; `lastChangedTime` is updated only when native
+  `lastChanged` or the geometry changes. Hit tests use the same polygons.
+- Reflections: the global `XRWebGLBinding` is IWER's plus `getReflectionCubeMap(probe)`. It is one WebGL cube
+  texture per context (SRGB8_ALPHA8, or EXT_sRGB on WebGL1), updated in place from `onEnvironment`, and null
+  before the first map. GL state it touches is restored. Each new map fires `reflectionchange` on live light
+  probes. Only `srgba8` is offered (`preferredReflectionFormat`). There is no `createProjectionLayer`, so three.js
+  keeps XRWebGLLayer (WebGL) / XRGPUBinding (WebGPU).
+- Transient-input hit test for screen taps (A-Frame's `ar-hit-test` uses it).
+- `offerSession` is not exposed. A-Frame 1.8 (`xr-mode-ui XRMode: xr`) calls it at load and throws an unhandled
+  "Failed to enter VR mode" when it rejects; without it A-Frame skips the offer and keeps its AR button.
+- Frames: the bundle can run in every frame (native injects with `forMainFrameOnly: false`). Each frame posts
+  `ready { frame: 'main' | 'sub' }` lazily, on its first `isSessionSupported` / `requestSession`, so only the frame
+  that uses WebXR registers a handle (playcanv.as runs the app in a same-origin iframe).
+
+## WebXR AR Module conformance
+
+Checked by `test/ar-module-conformance.test.ts` against https://immersive-web.github.io/webxr-ar-module/.
+
+| Requirement | HoloWeb |
+|---|---|
+| `immersive-ar` is a supported `XRSessionMode` | Yes; `immersive-vr` is not offered |
+| `environmentBlendMode` reflects the compositor | `alpha-blend` in mono (camera passthrough), `additive` in HoloKit stereo (optical see-through), follows mid-session toggles; never `opaque` |
+| `interactionMode` | `screen-space` in mono, `world-space` in stereo |
+| `XRView.isFirstPersonObserver` | Present, always `false` (including the inert 2nd view) |
+| `secondary-views` feature | Not granted: optional is dropped, required rejects with `NotSupportedError` |
+| Screen-space input | Tap = transient source, `targetRayMode: 'screen'`, profile `generic-touchscreen`, `selectstart` / `select` / `selectend` |
+| No camera image exposure | `camera-access` not granted (required -> `NotSupportedError`), no `XRView.camera`, no `getCameraImage` |
+
+Unsupported required features reject with a `NotSupportedError` DOMException (IWER used a plain `Error`).
+
+## Hand tracking (`hand-tracking` feature)
+
+- Native (proposed protocol addition, see plan/notes.md): when `requestSession.features` contains `hand-tracking`,
+  run `VNDetectHumanHandPoseRequest` (2 hands) on `ARFrame.capturedImage`, lift the 21 joints to 3D with LiDAR
+  `sceneDepth`, and call `bridge.onHands([{ handedness, joints: number[63], confidence: number[21] }])`:
+  world-space metres, Vision joint order (wrist; thumb CMC/MP/IP/tip; index, middle, ring, little MCP/PIP/DIP/tip).
+- Polyfill: IWER's two `XRHandInput`s are driven from that data (their canned poses are disabled), so pages get
+  `inputSource.hand` with 25 `XRJointSpace`s, `getJointPose` / `fillPoses` / `fillJointRadii`.
+  - Finger metacarpals (not in Vision) are estimated at 25 % from wrist to knuckle.
+  - Orientation: -Z along the bone, +Y out of the back of the hand. Radii are typical adult values.
+  - Target ray: from the pinch point, pointing away from the viewer.
+  - Pinch (thumb tip to index tip < 2 cm, release > 3.5 cm) -> `selectstart`, then `select` + `selectend`.
+  - Joints under 0.3 confidence keep their last position; a hand disappears 250 ms after its last update.
+- `examples/three-ar-hands.html`: three.js `XRHandModelFactory` spheres; pinch drops a cube at the fingertip.
 
 ## Native integration checklist
 
@@ -156,7 +214,9 @@ the device config. The config sets `userAgent` to the real UA, because IWER over
   Quest), but HoloKit eye rects then land (H - 2y - h) px higher (~130 of 780 px in the e2e run).
   The WebGPU backend path and classic `WebGLRenderer` are correct. Upstream fix: XRManager should pass
   `y = framebufferHeight - y - height` on the WebGL backend.
-- Light estimation has no reflection cube map (`reflectionchange` never fires) and no measured calibration.
+- Light estimation values (lux/K -> SH + directional) are a documented mapping, not a measured calibration.
+- threejs.org `webxr_ar_lighting` loads a 2K HDR default environment in parallel; if it finishes after
+  `estimationstart` its callback overwrites `scene.environment` with the default (page race, not the polyfill).
 - `XRGPUBinding.createProjectionLayer({ textureType: 'texture' })` is rejected; only `texture-array`.
 - After a mono rotation the image is resampled (e.g. a 2556x1179 target shown at 1179x2556): correct geometry,
   lower vertical detail, until the session is re-entered.

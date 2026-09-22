@@ -118,7 +118,7 @@ function presentFrame(session: XRSession): void {
   const fb = nativeFramebufferSize();
   const blits: LayerBlit[] = [];
   const stereo = session[P_SESSION].device.stereoEnabled;
-  for (const layer of session.renderState.layers) {
+  for (const layer of session.renderState.layers ?? []) {
     if (!(layer instanceof XRGPUProjectionLayer) || layer.usedEyes.size === 0) continue;
     if (layer.usedEyes.size >= 2) layer.twoViewFrames++;
     for (const eye of layer.usedEyes) {
@@ -206,7 +206,7 @@ export class XRGPUBinding {
 
 /** True while three.js' WebGPU descriptor cache may still hold a 1-view descriptor (views.ts). */
 export function needsPrimingView(session: XRSession): boolean {
-  return session.renderState.layers.some((l) => l instanceof XRGPUProjectionLayer && l.twoViewFrames < PRIME_FRAMES);
+  return (session.renderState.layers ?? []).some((l) => l instanceof XRGPUProjectionLayer && l.twoViewFrames < PRIME_FRAMES);
 }
 
 /** Install globalThis.XRGPUBinding (and the layer classes) if WebGPU is present. */

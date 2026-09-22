@@ -66,6 +66,11 @@ beforeAll(async () => {
   Object.defineProperty(navigator, 'gpu', { configurable: true, value: { getPreferredCanvasFormat: () => 'bgra8unorm' } });
   (globalThis as Record<string, unknown>).GPUTextureUsage = { RENDER_ATTACHMENT: 16, TEXTURE_BINDING: 4, COPY_SRC: 1, COPY_DST: 2 };
   (globalThis as Record<string, unknown>).WebGL2RenderingContext = class {};
+  // A fake native transport: without window.webkit the polyfill would start the desktop mock, whose
+  // 60 Hz mono frames race with this test's own onFrame pushes (the source of an earlier flake).
+  (globalThis as Record<string, unknown>).webkit = {
+    messageHandlers: { holoweb: { postMessage: (m: { type: string }) => Promise.resolve(m.type === 'requestSession' ? { ok: true, mode: 'mono' } : { ok: true }) } },
+  };
   const getContext = HTMLCanvasElement.prototype.getContext;
   HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, kind: string, ...rest: unknown[]) {
     if (kind === 'webgpu') return { configure() {}, unconfigure() {}, getCurrentTexture: () => fakeTexture({ size: { width: this.width, height: this.height } }) };

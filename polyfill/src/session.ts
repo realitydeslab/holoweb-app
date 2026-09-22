@@ -1,7 +1,7 @@
 /**
  * Session lifecycle glue between IWER's XRSystem and the native bridge.
  *
- * - immersive-ar sessions call native `requestSession` (native starts ARKit frames) and
+ * - immersive sessions (immersive-ar, immersive-vr) call native `requestSession` with their mode (native starts ARKit frames; for VR it draws black instead of the camera) and
  *   `endSession` when the page or native ends the session, and post `rendered { t }` after each
  *   XR frame. Inline sessions stay JS-only.
  * - Reference spaces follow plan/bridge_protocol.md: `local` = ARKit world origin,
@@ -14,9 +14,8 @@
  *   WebGL pages follow directly; XRGPUBinding sessions rely on the priming view in gpu-binding.ts.
  */
 import { mat4 } from 'gl-matrix';
-import { P_DEVICE, P_SPACE, XRDevice, XRReferenceSpace, XRSession, XRSystem } from 'iwer';
+import { P_DEVICE, P_SESSION, P_SPACE, P_SYSTEM, XRDevice, XRReferenceSpace, XRSession, XRSystem } from 'iwer';
 import type { XRSessionInit, XRSessionMode } from 'iwer/lib/session/XRSession.js';
-import type { NativeAnchors } from './anchors.js';
 import type { HoloWebBridge } from './bridge.js';
 import { addFrameEndListener } from './device.js';
 import { FloorTracker } from './floor.js';
@@ -41,13 +40,16 @@ function patchReferenceSpaces(session: XRSession, floor: FloorTracker): void {
 }
 
 const IMMERSIVE_CLASS = 'holoweb-immersive';
+/** The overlay root contains the page body: XR layers go behind the overlay content (as in Chrome). */
+const XR_BEHIND_CLASS = 'holoweb-xr-behind';
 const IMMERSIVE_CSS = `
 html.${IMMERSIVE_CLASS}, html.${IMMERSIVE_CLASS} body { background: transparent !important; }
 html.${IMMERSIVE_CLASS} body * { visibility: hidden !important; }
 html.${IMMERSIVE_CLASS} [data-holoweb-xr], html.${IMMERSIVE_CLASS} [data-holoweb-xr] *,
 html.${IMMERSIVE_CLASS} [data-holoweb-overlay], html.${IMMERSIVE_CLASS} [data-holoweb-overlay] * {
   visibility: visible !important;
-}`;
+}
+html.${XR_BEHIND_CLASS} [data-holoweb-xr] { z-index: -1 !important; pointer-events: none !important; }`;
 
 /** Hide page content for the duration of an immersive session; returns the restore function. */
 function enterImmersiveStyle(device: XRDevice, overlayRoot: Element | undefined): () => void {
@@ -59,9 +61,14 @@ function enterImmersiveStyle(device: XRDevice, overlayRoot: Element | undefined)
   }
   device.canvasContainer.dataset.holowebXr = '';
   overlayRoot?.setAttribute('data-holoweb-overlay', '');
-  document.documentElement.classList.add(IMMERSIVE_CLASS);
+  const html = document.documentElement;
+  html.classList.add(IMMERSIVE_CLASS);
+  // With root = <body> (or <html>) the XR canvases are inside the overlay root; a z-index above the
+  // root would cover the overlay, so they drop behind the page content instead.
+  const bodyOverlay = Boolean(overlayRoot && document.body && overlayRoot.contains(document.body));
+  if (bodyOverlay) html.classList.add(XR_BEHIND_CLASS);
   return () => {
-    document.documentElement.classList.remove(IMMERSIVE_CLASS);
+    html.classList.remove(IMMERSIVE_CLASS, XR_BEHIND_CLASS);
     overlayRoot?.removeAttribute('data-holoweb-overlay');
   };
 }
@@ -77,11 +84,107 @@ function raiseOverlay(root: Element | undefined): (() => void) | null {
   };
 }
 
+/**
+ * Frame-level XRSystem adjustments:
+ * - `ready` is posted on the first isSessionSupported / requestSession of this frame (bridge.ensureReady).
+ * - offerSession is removed: HoloWeb cannot offer immersive-vr, and A-Frame (xr-mode-ui XRMode: xr) calls
+ *   it at load and reports an unhandled "Failed to enter VR mode" when it rejects; without the method it
+ *   skips the offer and keeps its AR button.
+ */
+export function installFrameHooks(device: XRDevice, bridge: HoloWebBridge): void {
+  const xr = device[P_DEVICE].xrSystem;
+  if (!(xr instanceof XRSystem)) throw new Error('HoloWeb: installRuntime must run before frame hooks');
+  delete (XRSystem.prototype as unknown as Record<string, unknown>).offerSession;
+  const isSessionSupported = xr.isSessionSupported.bind(xr);
+  const requestSession = xr.requestSession.bind(xr);
+  const sessions = new SessionSlots(xr);
+  xr.isSessionSupported = async (mode) => {
+    await bridge.ensureReady();
+    return isSessionSupported(mode);
+  };
+  xr.requestSession = async (mode, options) => {
+    await bridge.ensureReady();
+    // IWER rejects unsupported required features with a plain Error; the spec wants NotSupportedError.
+    const unsupported = (options?.requiredFeatures ?? []).filter((f) => !device.supportedFeatures.includes(f));
+    if (unsupported.length > 0) {
+      throw new DOMException(`Required features not supported: ${unsupported.join(', ')}`, 'NotSupportedError');
+    }
+    const parked = mode === 'inline' ? null : sessions.parkInline();
+    try {
+      const session = await requestSession(mode, options);
+      sessions.track(session);
+      return session;
+    } catch (err) {
+      if (parked) sessions.unpark(parked);
+      throw err;
+    }
+  };
+}
+
+/**
+ * IWER allows one XRSession at a time and its `end` listener clears activeSession unconditionally.
+ * Pages often hold an inline ("magic window") session and then enter AR, so:
+ * - requesting an immersive session parks the active inline session (it stays valid but its frame
+ *   loop idles without running callbacks, as in Chrome while presenting) and grants the immersive one;
+ * - when any session ends, the remaining live session becomes active again (immersive first) and a
+ *   parked inline session resumes; a second immersive session is still rejected by IWER.
+ */
+class SessionSlots {
+  private readonly live = new Set<XRSession>();
+  private readonly parked = new Set<XRSession>();
+
+  constructor(private readonly xr: XRSystem) {}
+
+  /** Park the active inline session so an immersive one can be granted. */
+  parkInline(): XRSession | null {
+    const active = this.xr[P_SYSTEM].activeSession;
+    if (!active || active[P_SESSION].mode !== 'inline') return null;
+    this.parked.add(active);
+    this.xr[P_SYSTEM].activeSession = undefined;
+    return active;
+  }
+
+  unpark(session: XRSession): void {
+    this.parked.delete(session);
+    if (!session[P_SESSION].ended && !this.xr[P_SYSTEM].activeSession) this.xr[P_SYSTEM].activeSession = session;
+  }
+
+  track(session: XRSession): void {
+    this.live.add(session);
+    const state = session[P_SESSION];
+    if (state.mode === 'inline') {
+      const frame = state.onDeviceFrame;
+      // IWER reschedules through this property, so the wrapper stays in the loop
+      state.onDeviceFrame = () => {
+        if (state.ended) return;
+        if (this.parked.has(session)) {
+          state.deviceFrameHandle = globalThis.requestAnimationFrame(state.onDeviceFrame);
+          return;
+        }
+        frame();
+      };
+    }
+    // registered after IWER's own listener, which has just cleared activeSession
+    session.addEventListener('end', () => this.onEnd(session), { once: true });
+  }
+
+  private onEnd(session: XRSession): void {
+    this.live.delete(session);
+    this.parked.delete(session);
+    const remaining = [...this.live];
+    const immersive = remaining.find((s) => s[P_SESSION].mode !== 'inline');
+    const next = immersive ?? remaining.find((s) => s[P_SESSION].mode === 'inline');
+    if (!immersive) this.parked.clear();
+    this.xr[P_SYSTEM].activeSession = next;
+  }
+}
+
 export function installSessionHooks(
   device: XRDevice,
   bridge: HoloWebBridge,
   input: ScreenInput,
-  anchors: NativeAnchors,
+  /** Per-session native state to drop when an immersive session ends (anchors, hands, planes, maps). */
+  onSessionEnd: () => void,
 ): void {
   const xr = device[P_DEVICE].xrSystem;
   if (!(xr instanceof XRSystem)) throw new Error('HoloWeb: installRuntime must run before session hooks');
@@ -91,11 +194,11 @@ export function installSessionHooks(
     const session = await iwerRequestSession(mode, options);
     const floor = new FloorTracker(bridge.environment.planeData);
     patchReferenceSpaces(session, floor);
-    if (mode !== 'immersive-ar') return session;
+    if (mode === 'inline') return session;
 
     let endedByNative = false;
     try {
-      const reply = await bridge.requestNativeSession('immersive-ar', [...session.enabledFeatures]);
+      const reply = await bridge.requestNativeSession(mode, [...session.enabledFeatures]);
       if (!reply.ok) throw new DOMException(reply.error ?? 'Native AR session refused', 'NotSupportedError');
     } catch (err) {
       endedByNative = true;
@@ -130,7 +233,7 @@ export function installSessionHooks(
         restoreStyle();
         removeRendered();
         bridge.planeListeners.delete(onPlanes);
-        anchors.clear();
+        onSessionEnd();
         bridge.onNativeSessionEnded = null;
         if (!endedByNative) bridge.endNativeSession().catch((e) => console.warn('HoloWeb endSession', e));
       },

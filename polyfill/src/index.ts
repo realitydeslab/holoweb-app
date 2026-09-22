@@ -6,12 +6,16 @@
 import { NativeAnchors } from './anchors.js';
 import { HoloWebBridge, type NativeCallbacks } from './bridge.js';
 import { createHoloKitDevice } from './device.js';
+import { HandTracking } from './hand-input.js';
 import { installGPUBinding, needsPrimingView } from './gpu-binding.js';
 import { PlaneEnvironment } from './hittest.js';
+import { installTransientHitTest } from './hittest-transient.js';
 import { ScreenInput } from './input.js';
 import { createMockTransport } from './mock-native.js';
 import { installLightEstimation } from './light.js';
-import { installSessionHooks } from './session.js';
+import { PlaneTracking } from './planes.js';
+import { installReflectionBinding, ReflectionMaps } from './reflection.js';
+import { installFrameHooks, installSessionHooks } from './session.js';
 import { installViewCountPolicy } from './views.js';
 import { installOpaqueFramebuffer } from './webgl-layer.js';
 import { getWebKit, nullTransport, webkitTransport, type Transport } from './webkit.js';
@@ -27,6 +31,9 @@ export interface HoloWebGlobal extends NativeCallbacks {
   /** Stereo pose prediction horizon in ms (default 25, 0 disables). */
   setPrediction: HoloWebBridge['setPrediction'];
   readonly anchors: NativeAnchors;
+  readonly hands: HandTracking;
+  readonly planes: PlaneTracking;
+  readonly reflections: ReflectionMaps;
 }
 
 function selectTransport(): Transport {
@@ -52,8 +59,22 @@ export function install(): HoloWebGlobal {
   const anchors = new NativeAnchors(bridge);
   anchors.install();
   bridge.anchorsHandler = (list) => anchors.update(list);
-  installSessionHooks(device, bridge, input, anchors);
+  const hands = new HandTracking(device);
+  bridge.handsHandler = (list) => hands.update(list);
+  const planes = new PlaneTracking(device);
+  bridge.planeListeners.add((list) => planes.update(list));
+  const reflections = new ReflectionMaps();
+  bridge.environmentHandler = (env) => reflections.update(env);
+  installSessionHooks(device, bridge, input, () => {
+    anchors.clear();
+    hands.reset();
+    planes.clear();
+    reflections.clear();
+  });
+  installFrameHooks(device, bridge);
   installLightEstimation(() => bridge.latest?.light);
+  installReflectionBinding(reflections);
+  installTransientHitTest(environment);
   installGPUBinding();
   installViewCountPolicy(needsPrimingView);
   installOpaqueFramebuffer();
@@ -67,13 +88,16 @@ export function install(): HoloWebGlobal {
     hitTest: (origin, direction) => bridge.hitTest(origin, direction),
     setPrediction: (ms) => bridge.setPrediction(ms),
     anchors,
+    hands,
+    planes,
+    reflections,
   };
   Object.defineProperty(globalThis, '__holoweb', { value: api, configurable: true, writable: false });
 
-  bridge.announceReady().catch((err: unknown) => console.warn('HoloWeb: ready failed', err));
+  // `ready` is posted lazily on this frame's first WebXR call (installFrameHooks).
   // A back/forward-cache restore does not re-run scripts; native needs a fresh handle.
   globalThis.addEventListener?.('pageshow', (e: Event) => {
-    if ((e as PageTransitionEvent).persisted) {
+    if ((e as PageTransitionEvent).persisted && bridge.readyPosts > 0) {
       bridge.announceReady().catch((err: unknown) => console.warn('HoloWeb: ready failed', err));
     }
   });

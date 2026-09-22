@@ -54,13 +54,32 @@ export function lightTerms(light: LightEstimate): LightTerms {
   return { sphericalHarmonicsCoefficients: sh, primaryLightIntensity: primary, primaryLightDirection: [0, 1, 0] };
 }
 
+/** Probes of live sessions, for `reflectionchange` (reflection.ts). */
+export const liveProbes = new Set<XRLightProbe>();
+
 export class XRLightProbe extends EventTarget {
-  onreflectionchange: ((e: Event) => void) | null = null;
+  #onreflectionchange: ((e: Event) => void) | null = null;
   constructor(
     readonly session: XRSession,
     readonly probeSpace: XRSpace,
   ) {
     super();
+  }
+
+  // Event handler attribute, registered as a listener (same pattern as IWER's XRSession.onend).
+  get onreflectionchange(): ((e: Event) => void) | null {
+    return this.#onreflectionchange;
+  }
+
+  set onreflectionchange(handler: ((e: Event) => void) | null) {
+    if (this.#onreflectionchange) this.removeEventListener('reflectionchange', this.#onreflectionchange);
+    this.#onreflectionchange = typeof handler === 'function' ? handler : null;
+    if (this.#onreflectionchange) this.addEventListener('reflectionchange', this.#onreflectionchange);
+  }
+
+  /** Fire `reflectionchange`. */
+  notifyReflectionChange(): void {
+    this.dispatchEvent(new Event('reflectionchange'));
   }
 }
 
@@ -77,6 +96,12 @@ export class XRLightEstimate {
   }
 }
 
+let onProbeCreated: ((probe: XRLightProbe) => void) | null = null;
+/** Hook for reflection.ts: a probe created after a map arrived still gets `reflectionchange`. */
+export function setProbeCreatedHook(hook: (probe: XRLightProbe) => void): void {
+  onProbeCreated = hook;
+}
+
 /** Install session.requestLightProbe and frame.getLightEstimate over a light source. */
 export function installLightEstimation(latestLight: () => LightEstimate | null | undefined): void {
   let cached: { light: LightEstimate; estimate: XRLightEstimate } | null = null;
@@ -88,13 +113,21 @@ export function installLightEstimation(latestLight: () => LightEstimate | null |
   Object.defineProperty(XRSession.prototype, 'requestLightProbe', {
     configurable: true,
     writable: true,
-    value: async function (this: XRSession): Promise<XRLightProbe> {
+    value: async function (this: XRSession, options: { reflectionFormat?: string } = {}): Promise<XRLightProbe> {
       if (this[P_SESSION].ended) throw new DOMException('XRSession has ended', 'InvalidStateError');
       if (!this.enabledFeatures.includes('light-estimation')) {
         throw new DOMException("The 'light-estimation' feature is not enabled", 'NotSupportedError');
       }
+      // Only the preferred format is offered: 8-bit sRGB cube maps.
+      if (options.reflectionFormat !== undefined && options.reflectionFormat !== 'srgba8') {
+        throw new DOMException(`Reflection format ${options.reflectionFormat} is not supported`, 'NotSupportedError');
+      }
       const globalSpace = this[P_SESSION].device[P_DEVICE].globalSpace;
-      return new XRLightProbe(this, new XRSpace(globalSpace));
+      const probe = new XRLightProbe(this, new XRSpace(globalSpace));
+      liveProbes.add(probe);
+      this.addEventListener('end', () => liveProbes.delete(probe), { once: true });
+      onProbeCreated?.(probe);
+      return probe;
     },
   });
   Object.defineProperty(XRFrame.prototype, 'getLightEstimate', {

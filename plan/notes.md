@@ -314,3 +314,132 @@ Open (polyfill): re-post `ready` on `pageshow` with persisted=true (bfcache rest
   - Toggle cases now expect `mono:1 stereo:2 mono:2 stereo:2` (three-ar WebGL, three-ar-webgpu, demo.html).
 - Negative control: building with the policy disabled (priming only) made both toggle cases, the fixture and Toji fail. The fixture showed 55,796 stale red px in mono and the right-eye `gl.viewport` still called; Toji also still called the right-eye rect in mono. This is the device bug, reproduced headless. The policy was restored and the bundle rebuilt.
 - Build: 154.9 KB (48.1 KB gzip). Not run on a device.
+- Follow-up (same batch):
+  - The inert view now has a true 0x0 viewport: `nativeViewports.right = {0,0,0,0}` in mono, so `XRWebGLLayer.getViewport` returns 0x0; `XRGPUBinding.getViewSubImage` returns `XRViewport(0,0,0,0)` for it. Before this, IWER's default was width 0 with full height.
+  - The fixture moved to three@0.111.0 (`examples/fixtures/old-three-r111.html`, devDep `three-r111`); r111 has the same fixed-ArrayCamera code as Toji's r111dev.
+  - `examples/ar-scene.js` `?stats` JSON has `views` (unchanged: number of XR views reported) and `activeViews` (views whose XRViewport has non-zero width and height, taken from three's XR sub-camera viewports, which are the `getViewport` / `getViewSubImage` viewports; 0 when not presenting).
+  - Headless `?autostart&stats` lines, mono -> stereo -> mono: three-ar.html views 1/2/2, activeViews 1/2/1; three-ar-webgpu.html the same.
+  - Toggle e2e cases assert both (phases `mono:1/1 stereo:2/2 mono:2/1 stereo:2/2`).
+  - `npm test` 53/53, `npm run test:e2e` 12/12 (with HOLOWEB_E2E_TOJI=1), build 155.0 KB (48.2 KB gzip).
+
+## Polyfill execution log (hand tracking: Vision hand pose + LiDAR -> WebXR Hand Input)
+
+2026-09-22, requested by the user. Scope: `polyfill/` + this note; not committed. Native side not implemented; the proposal is below.
+
+### Proposed protocol addition (for plan/bridge_protocol.md, native owner to confirm)
+- The polyfill advertises `hand-tracking`. Native runs hand tracking only when `requestSession.features` contains it.
+- native -> JS: `bridge.onHands(hands)` after each Vision result (~30 Hz), `hands = [{ handedness: "left" | "right", joints: number[63], confidence: number[21] }]`. Send `[]` when no hand is found.
+  - `joints`: 21 points x (x, y, z), ARKit world space, metres, Vision order: 0 wrist; 1-4 thumb CMC, MP, IP, tip; 5-8 index MCP, PIP, DIP, tip; 9-12 middle; 13-16 ring; 17-20 little.
+  - `confidence`: Vision per-joint confidence.
+- Suggested native pipeline:
+  1. Run `VNDetectHumanHandPoseRequest` (maximumHandCount 2) on `ARFrame.capturedImage`, orientation `.up` (sensor orientation), on a background queue. Drop frames while busy; never block the ARSession delegate.
+  2. Convert each Vision point (normalised, lower-left origin) to capturedImage pixels (u, v).
+  3. Sample `smoothedSceneDepth.depthMap` (256x192, scaled coordinates) at (u, v); skip or flag low `confidenceMap`. If a joint has no valid depth, use the median depth of the valid joints.
+  4. Unproject with the intrinsics at capturedImage resolution: X = (u - cx) / fx * d, Y = -(v - cy) / fy * d, Z = -d.
+  5. Transform to world with the raw `ARCamera.transform` (sensor orientation, matching the image), not the display-oriented pose.
+- `chirality` from Vision gives `handedness`; its meaning with the back camera needs a device check.
+- Phones without LiDAR: hand-size depth estimate (wrist to middle MCP ~9 cm) or no hands. JS works either way.
+
+### Polyfill side (done)
+- `src/hands.ts` (pure):
+  - Maps 21 -> 25 joints: thumb 1:1; finger MCP/PIP/DIP/tip -> phalanx-proximal/intermediate/distal/tip; `<finger>-metacarpal` = lerp(wrist, MCP, 0.25).
+  - Joint frames: -Z along the bone towards the tip (tips reuse the last bone); +Y out of the back of the hand from cross(indexMCP - wrist, pinkyMCP - wrist), negated for right hands; right-handed.
+  - Radii are typical adult values.
+  - Pinch uses thumb tip to index tip with hysteresis (< 2 cm on, > 3.5 cm off).
+- `src/hand-input.ts`:
+  - Drives IWER's left/right `XRHandInput` objects, which already provide `inputSource.hand` (XRHand of 25 XRJointSpaces), `getJointPose`, `fillPoses`, `fillJointRadii` and inputsourceschange.
+  - Two per-instance overrides, no IWER patch needed: IWER's per-frame canned-pose `updateHandPose` is replaced with a no-op, and its gamepad trigger (which fires `select` on press) is disabled.
+  - Events are dispatched in spec order: `selectstart` on pinch, `select` + `selectend` on release. Events start the frame after the page sees the source.
+  - Target ray: origin at the pinch point, pointing away from the viewer through it.
+  - Joints under 0.3 confidence keep their last position; incomplete skeletons are ignored.
+  - A hand is dropped 250 ms after its last update (`selectend` only, if it was pinching).
+  - Only sessions with `hand-tracking` get hand input sources (IWER filters the rest).
+- Mock native sends a synthetic right hand for `hand-tracking` sessions (`src/mock-hands.ts`): 35 cm in front of the camera, pinching 0.8 s of every 2.4 s, at 30 Hz.
+- `examples/three-ar-hands.html`: three.js `XRHandModelFactory` 'spheres'; pinch drops a cube at the index fingertip; `?backend=webgl` option.
+
+### Verification
+- `npm test`: 62/62. New `test/hands.test.ts` (9 tests):
+  - The joint list equals IWER's XRHandJoint order.
+  - Position mapping and the metacarpal estimate.
+  - Orientation: -Z along the bone, +Y dorsal for right and mirrored left hands, orthonormal with det +1, tips continue the last bone.
+  - Pinch hysteresis; incomplete hands rejected.
+  - Integration through an IWER session: one right hand source with 25 joints and inputsourceschange; `getJointPose` tip position and radius, `fillPoses`, `fillJointRadii`.
+  - Event order `selectstart` -> `select`, `selectend`; loss after 250 ms gives `selectend` only; no hand sources without `hand-tracking`.
+- `npm run test:e2e`: 13/13 (2 new).
+  - three-ar-hands.html on WebGPU and on WebGL: hands=1, joints=25, handSelects=1, cubes=1, hand model visible (12,475 / 14,221 drawn px).
+  - Screenshot checked by eye: a right hand from the back, fingers up, thumb on the left, the cube at the pinch point.
+- Build: 160.6 KB (50.1 KB gzip), +5.6 KB. Not run on a device (needs the native half).
+
+### Open
+- +Y = back of the hand follows my reading of the WebXR Hand Input joint convention. Verify on device with three's `XRHandMeshModel` (mesh profile): the hand mesh must not appear palm-flipped.
+- Vision chirality semantics with the rear camera, depth holes at fingertips, and the latency of Vision (~10-15 ms) + delivery all need device tuning.
+
+## Native execution log (planes polygon, environment map, test click)
+2026-09-22, iPhone 15 Pro "Holo iPhone 15 I" (iPhone16,1, iOS 27), phone lying still on a desk.
+
+Changes:
+- `onPlanes` items now include `polygon` and `lastChanged` (ARBridge+Frames.swift). The polygon is the boundary vertices in the frame of the sent transform (inverse of T(center)*Ry(rotationOnYAxis)), with y = 0. The code measures winding with a signed area and reverses it when needed, so the output is CCW seen from +Y whatever order ARKit uses. The first plane logs `[bridge] ARKit plane boundary winding ...` (not seen yet: no planes). An offline swiftc check with a rotated, offset rectangle recovered the rectangle exactly, CCW for both input windings. `lastChanged` = ARFrame timestamp (ms) of the plane's last didAdd/didUpdate.
+- `onEnvironment` (new EnvironmentProbeReader.swift). Source on device: rgba16Float cube, 256x256, 9 mips. The code blits mip 3 (32x32) into a shared buffer, converts linear half floats to sRGB bytes in the command-buffer completion handler, and sends at most 1 Hz. Metal and GL use the same cube face order and the same (s,t) formulas, with t=0 = first row, so faces and rows are copied unchanged (see the file header). Maps are sent only if the requestSession features include `light-estimation` (added to bridge_protocol.md). While the phone lies still, ARKit updates the probe once, so one map is sent per session.
+- `[bridge] requestSession features=...` and `[bridge] planes sent n= polygons=` (every 2 s at most) diagnostics.
+- DEBUG `HOLOWEB_TEST_CLICK=<selector>`: 2.5 s after each main-frame didFinish, clicks the element, with up to 5 retries 1 s apart.
+- regression.py: `env-plane-check.html` page checks and `third_party_run` for the three.js hittest, plane_detection and lighting examples.
+
+`Scripts/regression.py --skip-polyfill --device 00008130-000848EA38298D3A`: 51/61 passed.
+- env.*: 4/4 PASS (6 x 4096 bytes, face means 118/112/96/112/109/117).
+- three-hittest: 4/4 PASS (pushed 1560, skipped 0). three-lighting: 6/6 PASS (features light-estimation,dom-overlay,viewer,local; env map sent). The old bundled polyfill has no `onEnvironment` yet, so the call logs one `[bridge] call failed`.
+- FAIL planes.* (5): 0 planes, because the phone sees no surfaces. A person needs to hold the phone over a floor or table.
+- FAIL three-plane-detection (5): the bundled polyfill predates plane-detection support ("One or more required features are not supported by the device"), so no session starts. Re-run after Scripts/sync-polyfill.sh, with the phone pointed at a surface.
+
+## Polyfill execution log (plane detection, reflections, offerSession, iframes, AR Module conformance)
+
+2026-09-22. Scope: `polyfill/` + this note; not committed. Three queued batches.
+
+### 1. three.js AR examples: hittest, plane_detection, lighting
+- `plane-detection` (`src/planes.ts`):
+  - One IWER `XRPlane` per native plane id, reused while it lives; three's `XRPlanes` keys meshes by the object and builds each mesh once.
+  - planeSpace = plane transform (+Y normal); polygon = DOMPointReadOnly[] from native `polygon` (fallback: extent rectangle); orientation.
+  - lastChangedTime is updated only when native `lastChanged` or the geometry changes.
+  - Added to `frame.detectedPlanes` each frame for sessions with the feature. IWER's per-frame canned planes path stays empty.
+  - The hit test now uses the polygon (even-odd point-in-polygon) instead of the extent.
+- Reflections (`src/reflection.ts`):
+  - The global `XRWebGLBinding` is a subclass of IWER's (depth untouched) that remembers its GL context.
+  - `getReflectionCubeMap(probe)` returns one cube texture per context: SRGB8_ALPHA8 on WebGL2, EXT_sRGB/RGBA on WebGL1. It is updated in place per new `onEnvironment` map and null before the first map.
+  - Saved/restored GL state: the cube binding, UNPACK_FLIP_Y / PREMULTIPLY / ALIGNMENT, ROW_LENGTH / SKIP_*, and the PIXEL_UNPACK_BUFFER binding.
+  - `reflectionchange` fires on every live probe per new map, and once for probes created after a map arrived.
+  - `requestLightProbe({ reflectionFormat })` accepts only 'srgba8'.
+  - `onreflectionchange` is a listener-backed accessor, IWER's pattern (a class field was double-invoked by happy-dom).
+  - Verified against r186 `XREstimatedLight`: it checks `'XRWebGLBinding' in window` and writes the returned WebGLTexture into `renderer.properties.get(env).__webglTexture`. So it needs a real cube texture on the page's context, which it gets.
+  - No `createProjectionLayer` was added, so three keeps XRWebGLLayer (WebGL) and XRGPUBinding (WebGPU).
+- Mock (`src/mock-environment.ts`): floor (grows at 1 s: new lastChanged), table octagon, wall; 32x32 sky/ground gradient cube map at start and again at 2 s.
+- Also: `requestHitTestSourceForTransientInput` / `getHitTestResultsForTransientInput` (`src/hittest-transient.ts`). They were found missing by the A-Frame e2e (A-Frame `ar-hit-test`), and use the same plane raycast for 'screen' / 'transient-pointer' sources.
+- e2e (`scripts/e2e-three-official.mjs`): the three official pages are unmodified.
+  - They are vendored in `test/fixtures/threejs-r186` and served under their threejs.org URLs; `HOLOWEB_E2E_LIVE=1` uses the live pages, which also pass.
+  - build/jsm come from local r186; live threejs.org is also r186.
+  - The bundle is injected at document start; the scene is observed via three's `__THREE_DEVTOOLS__` hook; `#ARButton` is clicked.
+  - hittest: reticle becomes visible.
+  - plane_detection: `XRPlanes` has 3 meshes, still 3 after the plane update (identity stable).
+  - lighting: `estimationstart`, `XREstimatedLight.environment` backed by the polyfill cube (bindTexture(CUBE_MAP) without GL error), reflectionchange 1, cube served 1.
+  - `scene.environment` is informational: the page's 2K HDR default loads in parallel and its callback overwrites `scene.environment` when it finishes after estimationstart. This is a race in the example; tap Start AR after the page has loaded on device.
+
+### 2. offerSession and same-origin iframes
+- `offerSession` removed from IWER's XRSystem.prototype. A-Frame 1.8 `enterVR(false, true)` then resolves "OfferSession is not supported." instead of an unhandled "Failed to enter VR mode".
+- `ready` is lazy: each frame posts `{ type: 'ready', frame: 'main' | 'sub', bridge }` on its first `isSessionSupported` / `requestSession` (`bridge.ensureReady`). `pageshow` with persisted re-posts only if the frame had announced.
+- e2e:
+  - `examples/fixtures/iframe-host.html` (three-ar.html in a same-origin iframe): AR entered from the iframe; main frame ready=0, iframe ready=1 as 'sub', iframe XR loop 20 frames, 1 view.
+  - Live A-Frame 1.8 model-viewer: offerSession not exposed, AR button -> ar-mode, 20 XR frames, a tap runs ar-hit-test, no page errors.
+
+### 3. WebXR AR Module conformance
+- `environmentBlendMode`: 'alpha-blend' in mono, 'additive' in stereo, updated on every mode change (bridge.setLocalMode).
+- `interactionMode`: 'screen-space' in mono, 'world-space' in stereo.
+- `XRView.isFirstPersonObserver`: false on every view.
+- `secondary-views` is not granted (it isn't in supportedFeatures). Required unsupported features now reject with a `NotSupportedError` DOMException (IWER used a plain Error).
+- `test/ar-module-conformance.test.ts` (7 tests): immersive-ar supported; blend mode per mode across toggles; interaction mode per mode; isFirstPersonObserver false on mono / stereo / inert views; secondary-views optional dropped and required rejected; screen tap = transient 'screen' source with generic-touchscreen and selectstart/select/selectend then removal; no camera-access, no XRView.camera, no getCameraImage.
+- README has the conformance table.
+
+### Verification
+- `npm run typecheck` clean. `npm test`: 78/78 (8 files).
+- `npm run test:e2e`: 18/18 (fixture mode; the three official cases also pass with HOLOWEB_E2E_LIVE=1). The A-Frame case needs the network and SKIPs offline.
+- `npm run build`: 169.6 KB (53.1 KB gzip), was 160.6.
+- Flake observed once: `gpu-priming.test.ts` "presents only the views of the current mode" failed in 1 of ~16 full-suite runs and could not be reproduced in 10 consecutive runs; cause unknown.
+- `src/bridge.ts` is 389 lines, near the 400-line budget; split it on the next change.
+- Not run on a device.

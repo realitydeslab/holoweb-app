@@ -10,7 +10,7 @@
  *   pointerup   -> select, selectend, source removed (inputsourceschange removed)
  */
 import { mat4, quat, vec3, vec4 } from 'gl-matrix';
-import { P_DEVICE, P_SESSION, P_SPACE, XRDevice, XRInputSource, XRInputSourceEvent, XRSession, XRSpace } from 'iwer';
+import { P_DEVICE, P_SESSION, P_SPACE, XRDevice, XRInputSource, XRInputSourceEvent, XRSession, XRSessionEvent, XRSpace } from 'iwer';
 import { XRHandedness, XRTargetRayMode } from 'iwer/lib/input/XRInputSource.js';
 import { XREye } from 'iwer/lib/views/XRView.js';
 
@@ -80,7 +80,12 @@ export class ScreenInput {
 
   private readonly onDown = (e: PointerEvent): void => {
     if (!this.session || this.touch) return;
-    if (this.overlayRoot && e.target instanceof Node && this.overlayRoot.contains(e.target)) return;
+    // DOM Overlays: a touch on overlay content is XR input unless the page cancels `beforexrselect`.
+    if (this.overlayRoot && e.target instanceof Node && this.overlayRoot.contains(e.target)) {
+      const event = new XRSessionEvent('beforexrselect', { session: this.session, bubbles: true, cancelable: true });
+      e.target.dispatchEvent(event);
+      if (event.defaultPrevented) return;
+    }
     const ndc: [number, number] = [(e.clientX / innerWidth) * 2 - 1, 1 - (e.clientY / innerHeight) * 2];
     const stereo = this.device.stereoEnabled;
     const space = new XRSpace(this.device.viewerSpace);

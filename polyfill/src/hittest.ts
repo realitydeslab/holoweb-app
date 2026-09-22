@@ -22,6 +22,22 @@ export interface NativePlaneData {
   /** Plane size along local X and Z, metres. */
   extent: [number, number] | ArrayLike<number>;
   orientation: 'horizontal' | 'vertical';
+  /** Outline in plane space: flat x, y (= 0), z triples, counter-clockwise seen from +Y. */
+  polygon?: ArrayLike<number>;
+  /** Native timestamp (ms) of the plane's last update. */
+  lastChanged?: number;
+}
+
+/** Point-in-polygon on the plane's local XZ outline (even-odd rule). */
+export function insideOutline(x: number, z: number, outline: ArrayLike<number>): boolean {
+  let inside = false;
+  const n = Math.floor(outline.length / 3);
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = outline[i * 3], zi = outline[i * 3 + 2];
+    const xj = outline[j * 3], zj = outline[j * 3 + 2];
+    if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
+  }
+  return inside;
 }
 
 export interface Hit {
@@ -67,8 +83,13 @@ export function raycastPlanes(
     vec3.subtract(scratch.rel, h, c);
     const x = vec3.normalize(scratch.xAxis, column(scratch.xAxis, m, 0));
     const z = vec3.normalize(scratch.zAxis, column(scratch.zAxis, m, 2));
-    if (Math.abs(vec3.dot(scratch.rel, x)) > plane.extent[0] / 2) continue;
-    if (Math.abs(vec3.dot(scratch.rel, z)) > plane.extent[1] / 2) continue;
+    const lx = vec3.dot(scratch.rel, x);
+    const lz = vec3.dot(scratch.rel, z);
+    if (plane.polygon && plane.polygon.length >= 9) {
+      if (!insideOutline(lx, lz, plane.polygon)) continue;
+    } else if (Math.abs(lx) > plane.extent[0] / 2 || Math.abs(lz) > plane.extent[1] / 2) {
+      continue;
+    }
     // Pose: plane orientation (Y = normal) at the hit point.
     const out = mat4.fromValues(
       x[0], x[1], x[2], 0,
@@ -136,9 +157,14 @@ export class PlaneEnvironment implements SyntheticEnvironmentModule {
     this.planes = [];
   }
 
+  /** Hit-test queries that returned at least one hit (diagnostics). */
+  hitQueries = 0;
+
   computeHitTestResults(rayMatrix: mat4): mat4[] {
     const { origin, direction } = rayFromMatrix(rayMatrix);
-    return raycastPlanes(origin, direction, this.planes).map((h) => h.matrix);
+    const hits = raycastPlanes(origin, direction, this.planes).map((h) => h.matrix);
+    if (hits.length > 0) this.hitQueries++;
+    return hits;
   }
 
   computeDepthBuffer(): DepthSensingData | null {

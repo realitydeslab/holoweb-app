@@ -8,10 +8,10 @@
  */
 import { mat4 } from 'gl-matrix';
 import type { NativeCallbacks, RenderMode } from './bridge.js';
-import type { NativePlaneData } from './hittest.js';
+import { mockEnvironment, mockPlanes } from './mock-environment.js';
+import { mockHand } from './mock-hands.js';
 import type { Transport } from './webkit.js';
 
-const FLOOR_Y = -1.3;
 const FRAME_MS = 1000 / 60;
 
 export interface MockOptions {
@@ -30,10 +30,6 @@ export function mockCameraPose(t: number): mat4 {
   return m;
 }
 
-export function mockFloorPlane(): NativePlaneData {
-  const transform = Array.from(mat4.fromTranslation(mat4.create(), [0, FLOOR_Y, -1]));
-  return { id: 'mock-floor', transform, extent: [8, 8], orientation: 'horizontal' };
-}
 
 function queryParam(name: string): string | undefined {
   try {
@@ -54,6 +50,8 @@ export function createMockTransport(options: MockOptions = {}): Transport {
   // Anchors stay where they were created (a static world); echoed at 10 Hz like native.
   const anchors = new Map<string, number[]>();
   let nextAnchor = 1;
+  // Like native, hand tracking (Vision) runs only for sessions that asked for it.
+  let handsOn = false;
 
   const pushFrame = () => {
     const cb = target();
@@ -77,6 +75,8 @@ export function createMockTransport(options: MockOptions = {}): Transport {
       innerWidth >= innerHeight ? 'landscapeRight' : 'portrait',
       Date.now(),
     );
+    // Vision runs at ~30 Hz on device
+    if (handsOn && frameIndex % 2 === 0) cb.onHands([mockHand(pose, performance.now() - start)]);
   };
 
   const stop = () => {
@@ -97,15 +97,22 @@ export function createMockTransport(options: MockOptions = {}): Transport {
       },
       mode,
     }),
-    requestSession: () => {
+    requestSession: (msg) => {
       stop();
+      handsOn = Array.isArray(msg.features) && msg.features.includes('hand-tracking');
       pushFrame();
       timer = setInterval(pushFrame, FRAME_MS);
-      setTimeout(() => target()?.onPlanes([mockFloorPlane()]), 0);
+      const t0 = performance.now();
+      setTimeout(() => target()?.onPlanes(mockPlanes(false, t0)), 0);
+      setTimeout(() => target()?.onEnvironment(mockEnvironment(32, 1, t0)), 50);
+      // one plane update and one new reflection map later in the session (native: <= 10 Hz / <= 1 Hz)
+      setTimeout(() => timer !== null && target()?.onPlanes(mockPlanes(true, performance.now())), 1000);
+      setTimeout(() => timer !== null && target()?.onEnvironment(mockEnvironment(32, 0.9, performance.now())), 2000);
       return { ok: true, mode, frameRate: 60 };
     },
     endSession: () => {
       stop();
+      handsOn = false;
       anchors.clear();
       return { ok: true };
     },

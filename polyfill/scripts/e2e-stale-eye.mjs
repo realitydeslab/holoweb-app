@@ -11,6 +11,7 @@ import { join } from 'node:path';
 const ROUTES = [
   [/^https:\/\/cdn\.jsdelivr\.net\/npm\/three@0\.186\.0\/(.*)$/, 'node_modules/three'],
   [/^https:\/\/cdn\.jsdelivr\.net\/npm\/three@0\.111\.0\/(.*)$/, 'node_modules/three-r111'],
+  [/^https:\/\/cdn\.jsdelivr\.net\/npm\/three@0\.152\.2\/(.*)$/, 'node_modules/three-r152'],
 ];
 
 async function newPage(browser, root, problems) {
@@ -164,9 +165,46 @@ async function tojiCase({ browser, root, shotDir }) {
   return problems.length ? 1 : 0;
 }
 
+/** G1: three r152 WebGLRenderer must get renderState.layers === undefined and use XRWebGLLayer. */
+async function r152Case({ browser, base, root, shotDir }) {
+  const problems = [];
+  const { context, page } = await newPage(browser, root, problems);
+  try {
+    await page.goto(`${base}/examples/fixtures/three-r152.html`);
+    await page.locator('#ARButton', { hasText: 'START AR' }).click({ timeout: 10000 });
+    await page.waitForFunction(() => window.__fixture.xrFrames > 30, null, { timeout: 10000 });
+    const status = await page.evaluate(() => window.__fixture);
+    const { png, stats } = await colours(page);
+    await writeFile(join(shotDir, 'three-r152.png'), png);
+    const magenta = await page.evaluate(async (b64) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${b64}`;
+      await img.decode();
+      const cv = new OffscreenCanvas(img.width, img.height);
+      const ctx = cv.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const d = ctx.getImageData(0, 0, img.width, img.height).data;
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i] > 200 && d[i + 1] < 60 && d[i + 2] > 200) n++;
+      return n;
+    }, png.toString('base64'));
+    void stats;
+    if (status.layersAtStart !== 'undefined') problems.push(`renderState.layers at session start = ${status.layersAtStart}`);
+    if (magenta < 500) problems.push(`cube not rendered (${magenta} px)`);
+    problems.push(...status.errors.map((e) => `page error: ${e}`));
+    console.log(`${problems.length ? 'FAIL' : 'PASS'} fixtures/three-r152.html (three r${status.revision} WebGLRenderer) [G1 layers path]: renderState.layers=${status.layersAtStart}, xrFrames=${status.xrFrames}, cube px=${magenta}`);
+  } catch (err) {
+    problems.push(String(err.message ?? err).split('\n')[0]);
+    console.log('FAIL fixtures/three-r152.html');
+  }
+  for (const p of problems) console.log(`    ${p}`);
+  await context.close();
+  return problems.length ? 1 : 0;
+}
+
 export async function runStaleEyeChecks(env) {
-  let failures = await fixtureCase(env);
-  let cases = 1;
+  let failures = (await fixtureCase(env)) + (await r152Case(env));
+  let cases = 2;
   if (process.env.HOLOWEB_E2E_TOJI) {
     failures += await tojiCase(env);
     cases++;

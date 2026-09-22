@@ -3,7 +3,7 @@
 Minimum OS: iOS 27.0. Transport uses `WKJSHandle` (iOS 27) so native calls into a JS object by reference.
 
 ## Setup
-1. Polyfill (`holoweb-polyfill.js`) is injected as a `WKUserScript` at document start, main frame only, in the page world.
+1. Polyfill (`holoweb-polyfill.js`) is injected as a `WKUserScript` at document start, in all frames, in the page world. Native accepts messages from the main frame and from iframes whose security origin (scheme/host/port) equals the main frame's; cross-origin (incl. opaque, e.g. data:) frames are rejected with "holoweb bridge is available to the main frame only". Each frame's `ready` (optional `frame` id field) is stored separately; the frame that sends `requestSession` becomes the target of native -> JS calls (`callAsyncJavaScript(..., in: thatFrame, ...)`).
 2. Native enables `WKWebpagePreferences.allowsJSHandleCreationInPageWorld = true` in
    `webView(_:decidePolicyFor:preferences:decisionHandler:)` for every navigation.
 3. Native registers ONE message handler with reply: `holoweb` (`WKScriptMessageHandlerWithReply`).

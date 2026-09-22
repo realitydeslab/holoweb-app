@@ -72,15 +72,23 @@ window.__holoweb = bridge;  // fallback target
   const badAnchor = await native({ type: "createAnchor", pose: pose.map(() => Infinity) }).then(() => "resolved", () => "rejected");
   check("bridge.anchor-rejects-nonfinite", badAnchor === "rejected");
   await native({ type: "deleteAnchor", id: created.id });
-  // Iframes share the page world but must be refused by the bridge.
-  const iframeResult = await new Promise(resolve => {
+  // Cross-origin iframes (a data: URL has an opaque origin) must be refused by the bridge;
+  // same-origin iframes (srcdoc inherits this origin) are allowed (playcanv.as-style hosts).
+  const iframeProbe = (setup) => new Promise(resolve => {
     const f = document.createElement("iframe");
-    window.addEventListener("message", e => { if (e.data?.iframeBridge) resolve(e.data.iframeBridge); }, { once: true });
-    f.srcdoc = `<script>window.webkit.messageHandlers.holoweb.postMessage({type:"setMode",mode:"stereo"}).then(()=>parent.postMessage({iframeBridge:"resolved"},"*"),e=>parent.postMessage({iframeBridge:"rejected: "+e.message},"*"))<\/script>`;
+    const onMessage = e => { if (e.source === f.contentWindow && e.data?.iframeBridge) { window.removeEventListener("message", onMessage); resolve(e.data.iframeBridge); } };
+    window.addEventListener("message", onMessage);
+    setup(f);
     document.body.appendChild(f);
-    setTimeout(() => resolve("timeout"), 2000);
+    setTimeout(() => resolve("timeout"), 3000);
   });
-  check("bridge.iframe-rejected", iframeResult.startsWith("rejected"), iframeResult);
+  const probeScript = `<script>const h=window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.holoweb;` +
+    `if(!h){parent.postMessage({iframeBridge:"unavailable"},"*")}else{h.postMessage({type:"log",level:"log",message:"iframe probe"})` +
+    `.then(()=>parent.postMessage({iframeBridge:"resolved"},"*"),e=>parent.postMessage({iframeBridge:"rejected: "+e.message},"*"))}<\/script>`;
+  const crossOrigin = await iframeProbe(f => { f.src = "data:text/html," + encodeURIComponent(probeScript); });
+  check("bridge.iframe-cross-origin-rejected", crossOrigin.startsWith("rejected") || crossOrigin === "unavailable", crossOrigin);
+  const sameOrigin = await iframeProbe(f => { f.srcdoc = probeScript; });
+  check("bridge.iframe-same-origin-accepted", sameOrigin === "resolved", sameOrigin);
   const bad = await native({ type: "bogus" }).then(() => "resolved", e => "rejected: " + e.message);
   log("unknown type:", bad);
   check("bridge.unknown-type-rejected", bad.startsWith("rejected"));

@@ -155,9 +155,47 @@ def toggle_run(report: Report, device: str, page: str, label: str, seconds: int 
     report.add(f"device.{label}.no-page-errors", not errors, "; ".join(errors[:2]))
 
 
-def third_party_run(report: Report, device: str, url: str, label: str, seconds: int = 30) -> None:
-    """Opens a third-party WebXR page, presses its three.js ARButton, checks AR entry and streaming."""
-    log = launch(device, {"HOLOWEB_URL": url, "HOLOWEB_TEST_CLICK": "#ARButton"}, seconds)
+@dataclass(frozen=True)
+class Expect:
+    """A log line a third-party run must produce: check name suffix, regex, hint if missing."""
+    name: str
+    pattern: str
+    hint: str
+
+
+PLANES = Expect("planes", r"\[bridge\] planes sent n=\d+ polygons=[1-9]\d*",
+                "no plane polygons: needs real surfaces in view, move the phone")
+ENVIRONMENT = Expect("environment", r"\[bridge\] environment map sent [^\n]*", "no environment map sent")
+HANDS = Expect("hands", r"\[bridge\] hands sent [^\n]*", "hand tracker never reported")
+MESHES = Expect("meshes", r"\[bridge\] meshes sent n=[1-9][^\n]*",
+                "no meshes: LiDAR needs geometry in view, move the phone")
+IFRAME = Expect("iframe-bridge", r"\[bridge\] ready \S+ \(iframe\)[^\n]*", "no same-origin iframe sent ready")
+
+IMMERSIVE_WEB = "https://immersive-web.github.io/webxr-samples/"
+SAMPLE_BUTTON = "button.webvr-ui-button"  # WebXRButton from js/util/webxr-button.js
+# (path, label, required requestSession features, expected log lines). Known gaps per page are
+# listed in plan/samples_requirements.md.
+IMMERSIVE_WEB_SAMPLES: list[tuple[str, str, tuple[str, ...], tuple[Expect, ...]]] = [
+    ("proposals/mesh-detection.html", "iw-mesh-detection", ("mesh-detection",), (MESHES,)),
+    ("proposals/plane-detection.html", "iw-plane-detection", ("plane-detection",), (PLANES,)),
+    ("webgpu/immersive-ar-session.html", "iw-webgpu-ar-session", ("webgpu",), ()),
+    ("webgpu/immersive-hands.html", "iw-webgpu-hands", ("hand-tracking",), (HANDS,)),
+    ("anchors.html", "iw-anchors", ("anchors",), ()),
+    ("hit-test.html", "iw-hit-test", ("hit-test",), ()),
+    ("hit-test-anchors.html", "iw-hit-test-anchors", ("hit-test", "anchors"), ()),
+    ("immersive-hands.html", "iw-hands", ("hand-tracking",), (HANDS,)),
+    ("tests/interrupted-ar.html", "iw-interrupted-ar", (), ()),
+    ("tests/exit-button.html", "iw-exit-button", (), ()),
+]
+
+
+def third_party_run(report: Report, device: str, url: str, label: str, seconds: int = 30,
+                    click: str = "#ARButton", features: tuple[str, ...] = (),
+                    expect: tuple[Expect, ...] = ()) -> None:
+    """Opens a third-party WebXR page, presses its AR button (CSS selector, or "js:<expr>" for
+    canvas-drawn buttons; same-origin iframes are searched too), checks AR entry and streaming,
+    that `features` were requested, and that each `expect` line was logged."""
+    log = launch(device, {"HOLOWEB_URL": url, "HOLOWEB_TEST_CLICK": click}, seconds)
     name = f"device.{label}"
     clicked = re.search(r"\[test\] (clicked|no element) (.*)", log)
     report.add(f"{name}.clicked", bool(clicked) and clicked.group(1) == "clicked",
@@ -172,24 +210,50 @@ def third_party_run(report: Report, device: str, url: str, label: str, seconds: 
         report.add(f"{name}.frames", False, "no [bridge] ARKit stats line")
     # Deprecation notices arrive as "warn:" and are ignored.
     errors = re.findall(r"\[web\] (?:error|uncaught|unhandledrejection): ([^\n]*)", log)
+    errors += re.findall(r"\[bridge\] call failed ([^\n]*)", log)
     report.add(f"{name}.no-page-errors", not errors, "; ".join(e[:120] for e in errors[:2]))
     features_line = re.search(r"\[bridge\] requestSession features=([^\n]*)", log)
-    features = features_line.group(1).strip().split(",") if features_line else []
-    if label == "three-plane-detection":
-        report.add(f"{name}.feature", "plane-detection" in features, ",".join(features) or "no requestSession")
-        polygons = [(int(n), int(v)) for n, v in re.findall(r"\[bridge\] planes sent n=(\d+) polygons=(\d+)", log)]
-        best = max(polygons, key=lambda nv: nv[1], default=(0, 0))
-        report.add(f"{name}.planes", best[1] > 0,
-                   f"max n={best[0]} polygons={best[1]}" if best[1] else
-                   f"no plane polygons ({len(polygons)} sends): needs real surfaces in view, move the phone")
-    elif label == "three-lighting":
-        report.add(f"{name}.feature", "light-estimation" in features, ",".join(features) or "no requestSession")
-        env = re.search(r"\[bridge\] environment map sent ([^\n]*)", log)
-        report.add(f"{name}.environment", bool(env), env.group(1) if env else "no environment map sent")
+    requested = features_line.group(1).strip().split(",") if features_line else []
+    if features:
+        missing = [f for f in features if f not in requested]
+        report.add(f"{name}.features", not missing,
+                   ",".join(requested) if features_line else "no requestSession")
+    for item in expect:
+        found = re.findall(item.pattern, log)
+        report.add(f"{name}.{item.name}", bool(found), found[-1].strip() if found else item.hint)
+
+
+def hands_run(report: Report, device: str, seconds: int = 22) -> None:
+    """hands-check.html: the tracker must run (>= 15 results/s, "[bridge] hands sent" line, no
+    call failures) even with no hand in view; hand-dependent checks count only if a hand was seen."""
+    log = launch(device, {"HOLOWEB_PAGE": "hands-check.html"}, seconds)
+    seen = {m.group(2): (m.group(1) == "PASS", m.group(3).strip())
+            for m in re.finditer(r"\[check\] (PASS|FAIL) (\S+) ?([^\n]*)", log)}
+    ok, detail = seen.get("hands.tracker-rate", (False, "no result"))
+    report.add("device.hands.tracker-rate", ok, detail)
+    line = re.findall(r"\[bridge\] hands sent ([^\n]*)", log)
+    report.add("device.hands.log-line", bool(line), line[-1] if line else "no [bridge] hands sent line")
+    failures = re.findall(r"\[bridge\] (?:call failed onHands|hand pose request failed)[^\n]*", log)
+    report.add("device.hands.no-errors", not failures, "; ".join(failures[:2]))
+    if seen.get("hands.in-view", (False, ""))[0]:
+        for name in ["hands.shape", "hands.hand-rate", "hands.plausible-size"]:
+            ok, detail = seen.get(name, (False, "no result"))
+            report.add(f"device.{name}", ok, detail)
+    else:
+        print("  INFO  device.hands.*  no hand in view; hold a hand in front of the rear camera to run "
+              "hands.shape / hand-rate / plausible-size", flush=True)
 
 
 def stage_device(report: Report, device: str) -> None:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from importlib import import_module
+    lock = import_module("device-lock").device_lock
     print(f"\n[3/3] device {device}", flush=True)
+    with lock():
+        _stage_device(report, device)
+
+
+def _stage_device(report: Report, device: str) -> None:
     install = run(["xcrun", "devicectl", "device", "install", "app", "--device", device, str(app_path())])
     report.add("device.install", install.returncode == 0, tail(install.stderr, 3) if install.returncode else "")
     if install.returncode:
@@ -201,7 +265,8 @@ def stage_device(report: Report, device: str) -> None:
     page_checks(report, device, "bridge-check.html", 34, [
         "bridge.jshandle", "bridge.device-info", "bridge.frame-rate", "bridge.latency-p50",
         "bridge.raf-rate", "bridge.frame-args", "bridge.hit-test-reply", "bridge.hit-test-rejects-nan",
-        "bridge.anchor-roundtrip", "bridge.anchor-rejects-nonfinite", "bridge.iframe-rejected",
+        "bridge.anchor-roundtrip", "bridge.anchor-rejects-nonfinite", "bridge.iframe-cross-origin-rejected",
+        "bridge.iframe-same-origin-accepted",
         "bridge.unknown-type-rejected", "bridge.end-session-stops-frames"])
     page_checks(report, device, "xr-anchor-check.html", 16, [
         "xr.anchor-created", "xr.anchor-tracked-pose", "xr.anchor-deleted"])
@@ -213,10 +278,22 @@ def stage_device(report: Report, device: str) -> None:
     toggle_run(report, device, "examples/three-ar.html?autostart", "three-webgl")
     toggle_run(report, device, "examples/three-ar-webgpu.html?autostart", "three-webgpu")
 
+    hands_run(report, device)
+
     examples = "https://threejs.org/examples/"
     third_party_run(report, device, examples + "webxr_ar_hittest.html", "three-hittest")
-    third_party_run(report, device, examples + "webxr_ar_plane_detection.html", "three-plane-detection")
-    third_party_run(report, device, examples + "webxr_ar_lighting.html", "three-lighting")
+    third_party_run(report, device, examples + "webxr_ar_plane_detection.html", "three-plane-detection",
+                    features=("plane-detection",), expect=(PLANES,))
+    third_party_run(report, device, examples + "webxr_ar_lighting.html", "three-lighting",
+                    features=("light-estimation",), expect=(ENVIRONMENT,))
+    # PlayCanvas runs the app in a same-origin iframe and draws its AR button on the canvas.
+    third_party_run(report, device, "https://playcanv.as/p/AOYF3YyG/", "playcanvas-iframe",
+                    click="js:window.pc && pc.Application.getApplication() && "
+                          "(pc.Application.getApplication().fire('ar:request:start'), true)",
+                    expect=(IFRAME,))
+    for path, label, features, expect in IMMERSIVE_WEB_SAMPLES:
+        third_party_run(report, device, IMMERSIVE_WEB + path, label, click=SAMPLE_BUTTON,
+                        features=features, expect=expect)
 
     log = launch(device, {"HOLOWEB_PAGE": "examples/demo.html"}, 10)
     report.add("device.browsing-without-session",

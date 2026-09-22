@@ -43,6 +43,8 @@ export function maxViewsSeen(session: XRSession): number {
  * reasons (XRGPUBinding priming).
  */
 export function installViewCountPolicy(extraReason: (session: XRSession) => boolean): void {
+  // WebXR AR Module: HoloWeb has no secondary (observer) views.
+  Object.defineProperty(XRView.prototype, 'isFirstPersonObserver', { configurable: true, get: () => false });
   const getViewerPose = XRFrame.prototype.getViewerPose;
   XRFrame.prototype.getViewerPose = function (this: XRFrame, referenceSpace) {
     const pose = getViewerPose.call(this, referenceSpace);

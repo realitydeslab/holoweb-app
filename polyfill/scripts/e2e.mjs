@@ -7,6 +7,10 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { extname, join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { runFrameChecks } from './e2e-frames.mjs';
+import { runHandChecks } from './e2e-hands.mjs';
+import { runSampleChecks } from './e2e-samples.mjs';
+import { runThreeOfficialChecks } from './e2e-three-official.mjs';
 import { runStaleEyeChecks as staleEyeChecks } from './e2e-stale-eye.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -33,7 +37,7 @@ const browser = await chromium.launch({
   args: ['--enable-unsafe-webgpu', '--enable-gpu', '--use-angle=metal', '--ignore-gpu-blocklist'],
 });
 
-const cases = [
+const cases = process.env.HOLOWEB_E2E_ONLY === 'samples' ? [] : [
   { page: 'three-ar.html', mode: 'mono', backend: 'webgl', views: 1 },
   { page: 'three-ar.html', mode: 'stereo', backend: 'webgl', views: 2 },
   { page: 'three-ar-webgpu.html', mode: 'mono', backend: 'webgpu', views: 1, path: 'copy' },
@@ -224,10 +228,11 @@ for (const c of cases) {
   await context.close();
 }
 
-{
-  const r = await staleEyeChecks({ browser, base, root, shotDir });
+const suites = [staleEyeChecks, runHandChecks, runThreeOfficialChecks, runFrameChecks, runSampleChecks];
+for (const check of process.env.HOLOWEB_E2E_ONLY === 'samples' ? [runSampleChecks] : suites) {
+  const r = await check({ browser, base, root, shotDir });
   failures += r.failures;
-  for (let i = 0; i < r.cases; i++) cases.push({ page: 'stale-eye' });
+  for (let i = 0; i < r.cases; i++) cases.push({ page: check.name });
 }
 
 await browser.close();

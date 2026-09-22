@@ -7,9 +7,12 @@
  * dropped or late native call never stalls rendering.
  */
 import { mat4 } from 'gl-matrix';
-import type { XRDevice } from 'iwer';
+import { P_DEVICE, type XRDevice } from 'iwer';
+import { XREnvironmentBlendMode, XRInteractionMode } from 'iwer/lib/session/XRSession.js';
 import { nativeFramebufferSize, devicePixelRatioOrOne } from './device.js';
 import type { NativeAnchorData } from './anchors.js';
+import type { NativeHandData } from './hand-input.js';
+import type { NativeEnvironment } from './reflection.js';
 import type { NativePlaneData, PlaneEnvironment } from './hittest.js';
 import { PosePredictor } from './prediction.js';
 import { INERT_VIEWPORT } from './views.js';
@@ -77,10 +80,20 @@ export interface NativeCallbacks {
   onTracking(tracking: TrackingState): void;
   onPlanes(planes: NativePlaneData[]): void;
   onAnchors(anchors: NativeAnchorData[]): void;
+  onHands(hands: NativeHandData[]): void;
+  onEnvironment(environment: NativeEnvironment): void;
   onSessionEnded(reason?: string): void;
 }
 
 const isMode = (v: unknown): v is RenderMode => v === 'mono' || v === 'stereo';
+
+function isTopFrame(): boolean {
+  try {
+    return globalThis.top === globalThis.self; // identity comparison is allowed cross-origin
+  } catch {
+    return false;
+  }
+}
 
 function parseDeviceInfo(v: unknown): DeviceInfo | undefined {
   if (!isRecord(v)) return undefined;
@@ -118,6 +131,10 @@ export class HoloWebBridge {
   readonly planeListeners = new Set<(planes: readonly NativePlaneData[]) => void>();
   /** Receives onAnchors updates (NativeAnchors). */
   anchorsHandler: ((anchors: NativeAnchorData[]) => void) | null = null;
+  /** Receives onHands updates (HandTracking). */
+  handsHandler: ((hands: NativeHandData[]) => void) | null = null;
+  /** Receives onEnvironment reflection maps (ReflectionMaps). */
+  environmentHandler: ((environment: NativeEnvironment) => void) | null = null;
   /** Stereo-only viewer pose prediction; horizonMs 0 disables it. */
   readonly predictor = new PosePredictor();
   /** Orientation / framebuffer size changes seen between frames (presentation rescales). */
@@ -146,14 +163,33 @@ export class HoloWebBridge {
         this.planeListeners.forEach((l) => l(list));
       },
       onAnchors: (anchors) => this.anchorsHandler?.(Array.isArray(anchors) ? anchors : []),
+      onHands: (hands) => this.handsHandler?.(Array.isArray(hands) ? hands : []),
+      onEnvironment: (environment) => this.environmentHandler?.(environment),
       onSessionEnded: (reason) => this.onNativeSessionEnded?.(reason),
     };
   }
 
   /** Post `ready` with a WKJSHandle to the callbacks object (null if unsupported). */
+  /** 'main' for the top-level document, 'sub' inside an iframe (diagnostics for native). */
+  readonly frame: 'main' | 'sub' = isTopFrame() ? 'main' : 'sub';
+  /** Number of `ready` messages posted by this frame. */
+  readyPosts = 0;
+  private readyOnce: Promise<void> | null = null;
+
+  /**
+   * Post `ready` once, lazily: only frames that use WebXR (isSessionSupported / requestSession)
+   * announce themselves, so a main frame and a same-origin iframe don't both register a handle.
+   */
+  ensureReady(): Promise<void> {
+    this.readyOnce ??= this.announceReady().catch((err: unknown) => console.warn('HoloWeb: ready failed', err));
+    return this.readyOnce;
+  }
+
   async announceReady(): Promise<void> {
+    this.readyPosts++;
     const reply = await this.transport.post({
       type: 'ready',
+      frame: this.frame,
       bridge: this.transport.createHandle(this.callbacks),
     });
     if (!isRecord(reply)) return;
@@ -275,14 +311,24 @@ export class HoloWebBridge {
 
   private setLocalMode(mode: RenderMode): void {
     this.mode = mode;
-    this.device.stereoEnabled = mode === 'stereo';
+    const stereo = mode === 'stereo';
+    this.device.stereoEnabled = stereo;
+    // WebXR AR Module: what the compositor does, and how input works, in the current mode.
+    // Mono shows the camera behind the content (alpha-blend) with transient screen input;
+    // HoloKit is optical see-through (black is transparent: additive) with gaze input.
+    const state = this.device[P_DEVICE];
+    state.environmentBlendModes = {
+      ...state.environmentBlendModes,
+      'immersive-ar': stereo ? XREnvironmentBlendMode.Additive : XREnvironmentBlendMode.AlphaBlend,
+    };
+    state.interactionMode = stereo ? XRInteractionMode.WorldSpace : XRInteractionMode.ScreenSpace;
   }
 
   setIpd(ipd: number): void {
     this.ipd = clampIpd(ipd);
   }
 
-  async requestNativeSession(mode: 'immersive-ar' | 'inline', features: string[]): Promise<SessionReply> {
+  async requestNativeSession(mode: 'immersive-ar' | 'immersive-vr' | 'inline', features: string[]): Promise<SessionReply> {
     const reply = await this.transport.post({ type: 'requestSession', mode, features });
     const r = isRecord(reply) ? reply : {};
     const result: SessionReply = {

@@ -91,6 +91,16 @@ beforeAll(async () => {
 });
 
 describe('bridge ready handshake', () => {
+  it('posts ready lazily, once, on the first WebXR call, with frame: main', async () => {
+    expect(posted.filter((m) => m.type === 'ready')).toHaveLength(0); // page loaded, no WebXR used yet
+    await xr().isSessionSupported('immersive-ar');
+    await xr().isSessionSupported('immersive-ar');
+    const ready = posted.filter((m) => m.type === 'ready');
+    expect(ready).toHaveLength(1);
+    expect(ready[0].frame).toBe('main');
+    expect('offerSession' in (navigator as unknown as { xr: object }).xr).toBe(false);
+  });
+
   it('posts ready with a WKJSHandle wrapping the callbacks object', () => {
     const ready = posted.find((m) => m.type === 'ready');
     expect(ready).toBeDefined();
@@ -125,7 +135,7 @@ describe('immersive-ar session', () => {
   beforeAll(async () => {
     session = await xr().requestSession('immersive-ar', {
       requiredFeatures: ['hit-test'],
-      optionalFeatures: ['local-floor', 'dom-overlay', 'anchors', 'light-estimation', 'webgpu', 'plane-detection'],
+      optionalFeatures: ['local-floor', 'dom-overlay', 'anchors', 'light-estimation', 'webgpu', 'camera-access'],
     });
     // A layers-only render state (as XRGPUBinding uses) drives the frame loop without WebGL.
     session.updateRenderState({ layers: [{}], depthNear: 0.1, depthFar: 50 });
@@ -135,7 +145,7 @@ describe('immersive-ar session', () => {
     const req = posted.find((m) => m.type === 'requestSession');
     expect(req?.mode).toBe('immersive-ar');
     expect(session.enabledFeatures).toEqual(expect.arrayContaining(['hit-test', 'webgpu', 'dom-overlay', 'local']));
-    expect(session.enabledFeatures).not.toContain('plane-detection');
+    expect(session.enabledFeatures).not.toContain('camera-access');
     expect(req?.features).toEqual(session.enabledFeatures);
   });
 

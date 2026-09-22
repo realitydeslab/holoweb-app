@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <title>HoloWeb fixture: three.js r152 WebGLRenderer AR</title>
+    <!-- e2e fixture (not copied into the app). three r130-r173 on WebGL2 choose the WebXR Layers path
+         whenever session.renderState.layers !== undefined (r152: `layers === undefined || !isWebGL2`
+         -> XRWebGLLayer, else XRWebGLBinding.createProjectionLayer). The mesh-detection sample uses r152. -->
+    <script src="../../dist/holoweb-polyfill.js"></script>
+    <script type="importmap">
+      { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.module.js",
+                     "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.152.2/examples/jsm/" } }
+    </script>
+    <style>html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }</style>
+  </head>
+  <body>
+    <script type="module">
+      import * as THREE from 'three';
+      import { ARButton } from 'three/addons/webxr/ARButton.js';
+
+      const status = (window.__fixture = { revision: THREE.REVISION, xrFrames: 0, layersAtStart: 'n/a', errors: [] });
+      addEventListener('error', (e) => status.errors.push(String(e.message)));
+      addEventListener('unhandledrejection', (e) => status.errors.push(String(e.reason)));
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setPixelRatio(devicePixelRatio);
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.xr.enabled = true;
+      document.body.appendChild(renderer.domElement);
+      const button = ARButton.createButton(renderer);
+      button.id = 'ARButton';
+      document.body.appendChild(button);
+
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.01, 20);
+      scene.add(new THREE.HemisphereLight(0xffffff, 0x888888, 3));
+      const cube = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), new THREE.MeshBasicMaterial({ color: 0xff00ff }));
+      scene.add(cube);
+
+      renderer.xr.addEventListener('sessionstart', () => {
+        status.layersAtStart = String(renderer.xr.getSession().renderState.layers);
+      });
+      renderer.setAnimationLoop((time, frame) => {
+        if (frame) {
+          status.xrFrames++;
+          // keep the cube 1 m in front of the viewer so it is on screen
+          const xrCam = renderer.xr.getCamera();
+          cube.position.set(0, 0, -1).applyMatrix4(xrCam.matrixWorld);
+        }
+        renderer.render(scene, camera);
+      });
+    </script>
+  </body>
+</html>

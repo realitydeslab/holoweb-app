@@ -1,0 +1,66 @@
+<!doctype html>
+<html>
+<head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>body{margin:0;background:transparent;color:#fff;font:13px -apple-system,sans-serif}pre{margin:70px 8px 8px;padding:8px;background:#0008;white-space:pre-wrap}</style>
+</head>
+<body><pre id="out"></pre>
+<script>
+// Raw-bridge check of onHands (plan/bridge_protocol.md). Hold a hand ~30-60 cm in front of the
+// rear camera for the hand checks; with no hand only hands.tracker-rate can pass.
+const out = document.getElementById("out");
+const log = (...a) => { const s = a.join(" "); console.log("[hands-check] " + s); out.textContent += s + "\n"; };
+const native = (msg) => window.webkit.messageHandlers.holoweb.postMessage(msg);
+// Machine-readable results for Scripts/regression.py: "[check] PASS|FAIL <name> <detail>".
+const check = (name, ok, detail = "") => console.log(`[check] ${ok ? "PASS" : "FAIL"} ${name} ${detail}`);
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+const calls = [];  // { at, hands }
+let camera = null;
+const bridge = {
+  onFrame(t, mode, transform) { camera = transform; },
+  onPlanes() {}, onAnchors() {}, onEnvironment() {},
+  onHands(hands) { calls.push({ at: performance.now(), hands, camera: camera && camera.slice(12, 15) }); },
+  onSessionEnded(reason) { log("sessionEnded", reason); },
+};
+window.__holoweb = bridge;
+
+const dist = (j, a, b) => Math.hypot(j[3 * a] - j[3 * b], j[3 * a + 1] - j[3 * b + 1], j[3 * a + 2] - j[3 * b + 2]);
+
+(async () => {
+  const handle = typeof window.webkit?.createJSHandle === "function" ? window.webkit.createJSHandle(bridge) : null;
+  await native({ type: "ready", bridge: handle });
+  await native({ type: "requestSession", mode: "immersive-ar", features: ["local", "hand-tracking"] });
+  await sleep(2000);  // warm-up
+  const c0 = calls.length, t0 = performance.now();
+  await sleep(8000);
+  const window_ = calls.slice(c0), seconds = (performance.now() - t0) / 1000;
+  const rate = window_.length / seconds;
+  log("onHands calls/sec:", rate.toFixed(1), "over", seconds.toFixed(1), "s");
+  check("hands.tracker-rate", rate >= 15, rate.toFixed(1) + "/s (>=15)");
+
+  const withHands = window_.filter(c => c.hands.length > 0);
+  check("hands.in-view", withHands.length > 0, withHands.length ? `${withHands.length} results with hands` : "no hand seen: hold a hand in front of the rear camera");
+  if (!withHands.length) {
+    for (const name of ["hands.shape", "hands.hand-rate", "hands.plausible-size"]) check(name, false, "no hand in view");
+  } else {
+    const all = withHands.flatMap(c => c.hands);
+    const bad = all.filter(h => !(h.handedness === "left" || h.handedness === "right") || h.joints?.length !== 63 ||
+      !h.joints.every(Number.isFinite) || h.confidence?.length !== 21);
+    check("hands.shape", !bad.length, bad.length ? `${bad.length}/${all.length} malformed` : `${all.length} hands, 63 finite numbers each`);
+    const span = (withHands[withHands.length - 1].at - withHands[0].at) / 1000;
+    const handRate = span > 0 ? (withHands.length - 1) / span : 0;
+    check("hands.hand-rate", handRate >= 15, handRate.toFixed(1) + "/s with a hand (>=15)");
+    // Wrist -> middle fingertip is 0.15-0.22 m on adult hands; allow depth noise.
+    const sizes = all.map(h => dist(h.joints, 0, 12)).sort((a, b) => a - b);
+    const median = sizes[sizes.length >> 1];
+    check("hands.plausible-size", median > 0.08 && median < 0.3, "wrist-middle tip median " + median.toFixed(3) + " m");
+    const last = withHands[withHands.length - 1];
+    const sides = {}; all.forEach(h => sides[h.handedness] = (sides[h.handedness] || 0) + 1);
+    log("handedness counts:", JSON.stringify(sides), "(right hand only in view should read mostly right)");
+    if (last.camera) log("wrist distance from camera m:", Math.hypot(last.hands[0].joints[0] - last.camera[0], last.hands[0].joints[1] - last.camera[1], last.hands[0].joints[2] - last.camera[2]).toFixed(3));
+  }
+  await native({ type: "endSession" });
+  log("DONE");
+})().catch(e => { log("ERROR", e.message); check("hands.script", false, e.message); });
+</script>
+</body></html>

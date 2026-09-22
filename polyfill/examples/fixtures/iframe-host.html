@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <title>HoloWeb fixture: WebXR in a same-origin iframe</title>
+    <!-- e2e fixture (not copied into the app), shaped like playcanv.as: the app runs in a same-origin
+         iframe and enters AR from there. The bundle is in both frames, as native injects it with
+         forMainFrameOnly: false; only the frame that uses WebXR posts `ready`. -->
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+      iframe { border: 0; display: block; width: 100%; height: 100%; }
+    </style>
+    <script src="../../dist/holoweb-polyfill.js"></script>
+  </head>
+  <body>
+    <iframe src="../three-ar.html" allow="xr-spatial-tracking"></iframe>
+  </body>
+</html>
