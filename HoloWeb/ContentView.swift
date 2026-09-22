@@ -5,24 +5,46 @@
 import SwiftUI
 
 struct ContentView: View {
-    
-    @State private var showWebView = false
-    private let urlString: String = "https://toji.github.io/webxr-particles/"
-    
+    @Environment(HoloWebState.self) private var state
+
     var body: some View {
         ZStack {
             Color.black
-                .ignoresSafeArea()
-            
-            WebView(url: URL(string: urlString)!)
-                .ignoresSafeArea()
+            MetalViewRepresentable()
+            WebViewRepresentable()
+            controls
         }
-        .onAppear() {
-            ARManager.shared.StartARSession()
+        .ignoresSafeArea()
+        .statusBarHidden()
+        .onAppear { state.startARSession() }
+        .onDisappear { state.pauseARSession() }
+    }
+
+    private var controls: some View {
+        VStack {
+            HStack {
+                Spacer()
+                Button {
+                    state.mode = state.mode == .mono ? .stereo : .mono
+                } label: {
+                    Image(systemName: state.mode == .mono ? "vision.pro" : "iphone")
+                }
+                Button {
+                    state.reload()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+            }
+            .font(.title2)
+            .padding()
+            .foregroundStyle(.white)
+            Spacer()
         }
     }
 }
 
 #Preview {
+    @Previewable @State var state = HoloWebState()
     ContentView()
+        .environment(state)
 }
