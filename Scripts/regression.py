@@ -189,12 +189,17 @@ IMMERSIVE_WEB_SAMPLES: list[tuple[str, str, tuple[str, ...], tuple[Expect, ...]]
 ]
 
 
+# tests/interrupted-ar deliberately throws (`new Exception(...)`) right after requestSession.
+SAMPLE_INTENDED_ERRORS = {"iw-interrupted-ar": r"Can't find variable: Exception"}
+
+
 def third_party_run(report: Report, device: str, url: str, label: str, seconds: int = 30,
                     click: str = "#ARButton", features: tuple[str, ...] = (),
-                    expect: tuple[Expect, ...] = ()) -> None:
+                    expect: tuple[Expect, ...] = (), ignore_errors: str | None = None) -> None:
     """Opens a third-party WebXR page, presses its AR button (CSS selector, or "js:<expr>" for
     canvas-drawn buttons; same-origin iframes are searched too), checks AR entry and streaming,
-    that `features` were requested, and that each `expect` line was logged."""
+    that `features` were requested, and that each `expect` line was logged. Page errors matching
+    `ignore_errors` (a regex) are the page's own, intended behaviour."""
     log = launch(device, {"HOLOWEB_URL": url, "HOLOWEB_TEST_CLICK": click}, seconds)
     name = f"device.{label}"
     clicked = re.search(r"\[test\] (clicked|no element) (.*)", log)
@@ -211,6 +216,8 @@ def third_party_run(report: Report, device: str, url: str, label: str, seconds: 
     # Deprecation notices arrive as "warn:" and are ignored.
     errors = re.findall(r"\[web\] (?:error|uncaught|unhandledrejection): ([^\n]*)", log)
     errors += re.findall(r"\[bridge\] call failed ([^\n]*)", log)
+    if ignore_errors:
+        errors = [e for e in errors if not re.search(ignore_errors, e)]
     report.add(f"{name}.no-page-errors", not errors, "; ".join(e[:120] for e in errors[:2]))
     features_line = re.search(r"\[bridge\] requestSession features=([^\n]*)", log)
     requested = features_line.group(1).strip().split(",") if features_line else []
@@ -242,6 +249,26 @@ def hands_run(report: Report, device: str, seconds: int = 22) -> None:
     else:
         print("  INFO  device.hands.*  no hand in view; hold a hand in front of the rear camera to run "
               "hands.shape / hand-rate / plausible-size", flush=True)
+
+
+def mesh_run(report: Report, device: str, seconds: int = 22) -> None:
+    """mesh-check.html: scene reconstruction must be enabled and error-free even with nothing in
+    range; mesh-dependent checks count only if meshes arrived."""
+    log = launch(device, {"HOLOWEB_PAGE": "mesh-check.html"}, seconds)
+    seen = {m.group(2): (m.group(1) == "PASS", m.group(3).strip())
+            for m in re.finditer(r"\[check\] (PASS|FAIL) (\S+) ?([^\n]*)", log)}
+    run = re.search(r"\[state\] ARKit run frameSemantics=\d+ sceneReconstruction=(\d+)", log)
+    report.add("device.mesh.reconstruction-enabled", bool(run) and run.group(1) != "0",
+               run.group(0) if run else "no [state] ARKit run line")
+    failures = re.findall(r"\[bridge\] call failed onMeshes[^\n]*", log)
+    report.add("device.mesh.no-errors", not failures, "; ".join(failures[:2]))
+    if seen.get("mesh.received", (False, ""))[0]:
+        for name in ["mesh.received", "mesh.shape", "mesh.indices-in-range", "mesh.rate"]:
+            ok, detail = seen.get(name, (False, "no result"))
+            report.add(f"device.{name}", ok, detail)
+    else:
+        print("  INFO  device.mesh.*  no meshes; sweep the phone over nearby surfaces to run "
+              "mesh.shape / indices-in-range / rate", flush=True)
 
 
 def stage_device(report: Report, device: str) -> None:
@@ -279,6 +306,7 @@ def _stage_device(report: Report, device: str) -> None:
     toggle_run(report, device, "examples/three-ar-webgpu.html?autostart", "three-webgpu")
 
     hands_run(report, device)
+    mesh_run(report, device)
 
     examples = "https://threejs.org/examples/"
     third_party_run(report, device, examples + "webxr_ar_hittest.html", "three-hittest")
@@ -293,7 +321,7 @@ def _stage_device(report: Report, device: str) -> None:
                     expect=(IFRAME,))
     for path, label, features, expect in IMMERSIVE_WEB_SAMPLES:
         third_party_run(report, device, IMMERSIVE_WEB + path, label, click=SAMPLE_BUTTON,
-                        features=features, expect=expect)
+                        features=features, expect=expect, ignore_errors=SAMPLE_INTENDED_ERRORS.get(label))
 
     log = launch(device, {"HOLOWEB_PAGE": "examples/demo.html"}, 10)
     report.add("device.browsing-without-session",

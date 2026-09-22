@@ -53,12 +53,16 @@ extension ARBridge: ARSessionDelegate {
 
     nonisolated func sessionWasInterrupted(_ session: ARSession) {
         // Tracking state already reports the interruption per frame; the session resumes by itself.
-        MainActor.assumeIsolated { print("[bridge] ARSession interrupted") }
+        MainActor.assumeIsolated {
+            print("[bridge] ARSession interrupted")
+            self.setVisibility("hidden")
+        }
     }
 
     nonisolated func sessionInterruptionEnded(_ session: ARSession) {
         MainActor.assumeIsolated {
             print("[bridge] ARSession interruption ended")
+            self.setVisibility("visible")
             self.planesDirty = true
             self.anchorsDirty = true
         }
@@ -75,6 +79,8 @@ extension ARBridge: ARSessionDelegate {
                 } else {
                     pendingPlaneUpdates.insert(anchor.identifier)
                 }
+            } else if let mesh = anchor as? ARMeshAnchor {
+                if removed { meshStreamer.remove(mesh) } else { meshStreamer.update(mesh) }
             } else if let probe = anchor as? AREnvironmentProbeAnchor {
                 if removed {
                     environmentProbes.removeValue(forKey: probe.identifier)
@@ -131,6 +137,8 @@ extension ARBridge: ARSessionDelegate {
         pushAnchorsIfNeeded(now: frame.timestamp)
         pushPlanesIfNeeded(frame, now: frame.timestamp)
         pushEnvironmentIfNeeded(frame)
+        pushHandsIfNeeded(frame)
+        pushMeshesIfNeeded(frame)
     }
 
     private func logStats(_ frame: ARFrame) {

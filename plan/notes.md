@@ -443,3 +443,39 @@ Changes:
 - Flake observed once: `gpu-priming.test.ts` "presents only the views of the current mode" failed in 1 of ~16 full-suite runs and could not be reproduced in 10 consecutive runs; cause unknown.
 - `src/bridge.ts` is 389 lines, near the 400-line budget; split it on the next change.
 - Not run on a device.
+
+## Native execution log (same-origin iframes, hands, meshes, visibility)
+2026-09-22, iPhone 15 Pro (iPhone16,1, iOS 27), phone lying still on a desk. Polyfill bundle synced 20:10.
+
+Same-origin iframes (BridgeFrames.swift, ARBridge.swift, HoloWebState.swift):
+- The polyfill and the console forwarder are injected into all frames. Console output from cross-origin frames is dropped.
+- The bridge accepts messages from the main frame and from iframes whose origin equals the main frame's. The main-frame origin comes from webView.url at didCommit; default ports are normalised to 0. Cross-origin and opaque (data:) frames get the old error text.
+- Each frame's `ready` is stored under its `frame` id, falling back to "main"/"iframe". The frame that sends `requestSession` becomes the call target: `callAsyncJavaScript(in: frameInfo)`, with nil for the main frame.
+- HOLOWEB_TEST_CLICK searches same-origin iframes and also accepts `js:<expr>`. playcanv.as draws its AR button on the canvas (a PlayCanvas UI entity), so it needs `js:pc.Application.getApplication().fire('ar:request:start')`.
+- Console errors are now forwarded as "Name: message @ first stack frame" instead of "{}".
+- Fixed a crash in Renderer.swift: the in-flight DispatchSemaphore trapped in Renderer.deinit when the Metal view was torn down with a frame on the GPU, because the completion handler captured self weakly. The semaphore is now captured strongly. Renderer.swift was already over 400 lines before this change.
+
+Hands (HandTracker.swift):
+- Vision runs on capturedImage with the EXIF orientation of the current interface orientation (portrait = .right). Joints are mapped back to raw sensor pixels, then to the smoothedSceneDepth map. Depth samples need confidence >= medium; joints without one use the median valid joint depth, and 0.45 m is used when there is no depth at all. Unprojection uses the intrinsics and the raw ARCamera.transform.
+- Busy frames are dropped; only the CVPixelBuffers of one frame are held.
+- Measured with no hand in view: 45–60 results/s, Vision 6.6–8.8 ms, camera stays at 60 fps.
+- Chirality is Vision's label, unflipped (rear camera, no mirroring). Not verified on device.
+
+Meshes (MeshStreamer.swift): with "mesh-detection" requested, sceneReconstruction = .meshWithClassification (3). Changed meshes are sent at most 2 Hz, each update capped at about 2 MB of base64; the remainder follows on the next frame. semanticLabel is the most common face class. No meshes arrived while the phone lay still.
+
+Visibility: `onVisibility` "hidden" on scene willDeactivate, didEnterBackground and ARSession interruption; "visible" on didActivate and interruption end. Only sent while streaming and only on change. Verified by switching to Settings with devicectl and back: hidden, visible, then streaming resumed at 60 fps.
+
+`Scripts/regression.py --skip-polyfill`: 109/124 passed. The in-run fixes (sample error allow-list, Error forwarding) came after the run.
+- bridge.frame-rate 49.0/s once; two re-runs gave 59.5 and 60.0.
+- planes.* (5) and the plane checks of the three.js and iw-plane-detection runs: no surfaces in view.
+- iw-plane-detection also logs `ReferenceError: Can't find variable: XRRay` (polyfill gap, reported to the polyfill agent).
+- iw-mesh-detection: the polyfill rejects mesh-detection (reported).
+- iw-interrupted-ar: the page throws on purpose (`new Exception`); regression.py now ignores that error.
+- Pass: iw-webgpu-ar-session, iw-webgpu-hands, iw-anchors, iw-hit-test, iw-hit-test-anchors, iw-hands, iw-exit-button (enters AR), playcanvas-iframe, three hittest/lighting.
+
+Needs a person:
+- Point the phone at a floor or table: planes checks and the plane samples.
+- Sweep a room: mesh-check.html and iw-mesh-detection (after polyfill mesh support).
+- Hold a hand 30–60 cm in front of the rear camera: hands-check.html shape, hand rate and plausible size. Raise only the right hand and check that handedness reads "right".
+
+Device contention: another agent ran regression.py on the same phone 19:59–20:09. My concurrent launches died with signal 9 or CoreDevice error 4000. Only one agent should use the phone at a time.

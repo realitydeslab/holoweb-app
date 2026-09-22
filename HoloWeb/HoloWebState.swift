@@ -58,20 +58,23 @@ final class HoloWebState: NSObject {
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         configuration.defaultWebpagePreferences.allowsJSHandleCreationInPageWorld = true
 
-        // Forward console output to Xcode so page-side failures are visible.
+        // Forward console output to Xcode so page-side failures are visible. All frames, but only
+        // the main frame and same-origin iframes (where the app may live) are printed.
         let consoleForwarder = WKUserScript(
             source: Self.consoleForwarderSource,
             injectionTime: .atDocumentStart,
-            forMainFrameOnly: true
+            forMainFrameOnly: false
         )
         configuration.userContentController.addUserScript(consoleForwarder)
 
         // The WebXR polyfill must run before any page script so navigator.xr exists on first use.
+        // All frames: some hosts (playcanv.as) run the app in a same-origin iframe; the bridge
+        // refuses cross-origin ones.
         if ProcessInfo.processInfo.environment["HOLOWEB_NO_POLYFILL"] == nil,
            let polyfillURL = Bundle.main.url(forResource: "holoweb-polyfill", withExtension: "js", subdirectory: "Web"),
            let polyfill = try? String(contentsOf: polyfillURL, encoding: .utf8) {
             configuration.userContentController.addUserScript(
-                WKUserScript(source: polyfill, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+                WKUserScript(source: polyfill, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         }
 
         configuration.setURLSchemeHandler(BundledPageSchemeHandler(), forURLScheme: BundledPageSchemeHandler.scheme)
@@ -106,9 +109,9 @@ final class HoloWebState: NSObject {
 
     /// Page started an immersive-ar session ("Start AR"). The mode stays whatever it is
     /// (mono unless a test page asked for stereo before starting).
-    func xrSessionStarted() {
+    func xrSessionStarted(features: Set<String> = []) {
         isInXRSession = true
-        startARSession()
+        startARSession(features: features)
         print("[state] phase -> \(phase)")
         #if DEBUG
         startDebugToggle()
@@ -138,8 +141,8 @@ final class HoloWebState: NSObject {
         }
     }
 
-    /// Test aid: HOLOWEB_TEST_CLICK=<CSS selector> clicks the first matching element 2.5 s after
-    /// each main-frame load, retrying up to 5 times at 1 s intervals (e.g. "#ARButton").
+    /// Test aid: HOLOWEB_TEST_CLICK=<CSS selector | js:expression> clicks the first matching element
+    /// 2.5 s after each main-frame load, retrying up to 5 times at 1 s intervals (e.g. "#ARButton").
     func runTestClick() {
         guard let selector = ProcessInfo.processInfo.environment["HOLOWEB_TEST_CLICK"], !selector.isEmpty else { return }
         testClickTask?.cancel()
@@ -148,7 +151,7 @@ final class HoloWebState: NSObject {
             for attempt in 0...5 {
                 guard !Task.isCancelled, let webView = self?.webView else { return }
                 let clicked = try? await webView.callAsyncJavaScript(
-                    "const el = document.querySelector(selector); if (!el) return false; el.click(); return true;",
+                    Self.testClickSource,
                     arguments: ["selector": selector], in: nil, contentWorld: .page) as? Bool
                 if clicked == true { return print("[test] clicked \(selector)") }
                 if attempt == 5 { return print("[test] no element \(selector)") }
@@ -156,6 +159,31 @@ final class HoloWebState: NSObject {
             }
         }
     }
+
+    /// Looks in the document and every same-origin iframe (recursively). A CSS selector clicks the
+    /// first match; "js:<expression>" instead evaluates the expression in each frame's window until
+    /// one returns truthy, for canvas-drawn buttons (e.g. PlayCanvas UI) that have no element.
+    private static let testClickSource = """
+    const windows = [];
+    const collect = (win) => {
+      windows.push(win);
+      for (const frame of win.document.querySelectorAll("iframe")) {
+        try { if (frame.contentDocument) collect(frame.contentWindow); } catch (_) {}
+      }
+    };
+    collect(window);
+    for (const win of windows) {
+      try {
+        if (selector.startsWith("js:")) {
+          if (new win.Function("return (" + selector.slice(3) + ");")()) return true;
+          continue;
+        }
+        const el = win.document.querySelector(selector);
+        if (el) { el.click(); return true; }
+      } catch (_) {}
+    }
+    return false;
+    """
     #endif
 
     /// Top-right exit button.
@@ -191,11 +219,24 @@ final class HoloWebState: NSObject {
         webView.reload()
     }
 
-    func startARSession() {
+    /// Runs world tracking. Costly extras are enabled only for the WebXR features that need them:
+    /// "hand-tracking" adds LiDAR depth (joint depth), "mesh-detection" adds scene reconstruction.
+    func startARSession(features: Set<String> = []) {
         guard !isARRunning else { return }
         let configuration = ARWorldTrackingConfiguration()
         configuration.planeDetection = [.horizontal, .vertical]
         configuration.environmentTexturing = .automatic
+        if features.contains("hand-tracking"), ARWorldTrackingConfiguration.supportsFrameSemantics(.smoothedSceneDepth) {
+            configuration.frameSemantics.insert(.smoothedSceneDepth)
+        }
+        if features.contains("mesh-detection") {
+            if ARWorldTrackingConfiguration.supportsSceneReconstruction(.meshWithClassification) {
+                configuration.sceneReconstruction = .meshWithClassification
+            } else if ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
+                configuration.sceneReconstruction = .mesh
+            }
+        }
+        print("[state] ARKit run frameSemantics=\(configuration.frameSemantics.rawValue) sceneReconstruction=\(configuration.sceneReconstruction.rawValue)")
         session.run(configuration)
         isARRunning = true
     }
@@ -217,7 +258,10 @@ final class HoloWebState: NSObject {
         try {
           window.webkit.messageHandlers.\(logHandlerName).postMessage(
             level + ": " + Array.from(args).map(a => {
-              try { return typeof a === "string" ? a : JSON.stringify(a); } catch { return String(a); }
+              if (typeof a === "string") return a;
+              // Errors (and DOMExceptions) stringify to "{}"; keep name, message and first stack frame.
+              if (a instanceof Error || a instanceof DOMException) return `${a.name}: ${a.message}` + (a.stack ? ` @ ${a.stack.split("\\n")[0]}` : "");
+              try { return JSON.stringify(a); } catch { return String(a); }
             }).join(" "));
         } catch (_) {}
       };
@@ -235,6 +279,10 @@ extension HoloWebState: WKScriptMessageHandler {
     nonisolated func userContentController(_ userContentController: WKUserContentController,
                                            didReceive message: WKScriptMessage) {
         guard message.name == Self.logHandlerName, let text = message.body as? String else { return }
-        print("[web] \(text)")
+        nonisolated(unsafe) let frame = message.frameInfo
+        MainActor.assumeIsolated {
+            guard frame.isMainFrame || bridge?.accepts(frame) == true else { return }
+            print("[web] \(text)")
+        }
     }
 }

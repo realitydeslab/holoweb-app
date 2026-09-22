@@ -7,7 +7,7 @@ import WebKit
 
 /// Native side of the HoloWeb bridge (see plan/bridge_protocol.md).
 ///
-/// JS -> native: one `holoweb` message handler with replies, main frame only.
+/// JS -> native: one `holoweb` message handler with replies, main frame and same-origin iframes.
 /// native -> JS: `callAsyncJavaScript` on the page's bridge object, addressed through the
 /// `WKJSHandle` the polyfill hands over in its `ready` message (iOS 27). If the page could not
 /// create a handle, calls go to `window.__holoweb` instead.
@@ -20,7 +20,11 @@ final class ARBridge: NSObject {
     let session: ARSession
     let webView: WKWebView
 
-    var bridgeHandle: WKJSHandle?
+    /// Frames that sent `ready` (main frame and same-origin iframes), by frame key.
+    var frames: [String: BridgeFrame] = [:]
+    var activeFrameKey: String?
+    /// Origin of the current main-frame document; same-origin iframes may use the bridge.
+    var mainOrigin: BridgeOrigin?
     var pageReady = false
     var streaming = false
     /// Bumped whenever the page changes, so completions from an old page are ignored.
@@ -45,6 +49,15 @@ final class ARBridge: NSObject {
     var lastEnvironmentSent: TimeInterval = 0
     let environmentReader = EnvironmentProbeReader()
     var loggedEnvironment = false
+    /// The page asked for "hand-tracking".
+    var handsRequested = false
+    let handTracker = HandTracker()
+    var handStats = HandStats()
+    /// The page asked for "mesh-detection".
+    var meshesRequested = false
+    let meshStreamer = MeshStreamer()
+    /// Last `onVisibility` state sent this session.
+    var visibility = "visible"
     /// Anchors the page created, by identifier. Held directly so removal never depends on
     /// `session.currentFrame` (nil while paused, stale right after creation).
     var pageAnchors: [String: ARAnchor] = [:]
@@ -72,6 +85,7 @@ final class ARBridge: NSObject {
             WeakReplyHandler(self), contentWorld: .page, name: Self.handlerName)
         webView.navigationDelegate = self
         session.delegate = self
+        observeSceneActivation()
     }
 
     private var target: String { bridgeHandle != nil ? "bridge" : "window.__holoweb" }
@@ -81,10 +95,12 @@ final class ARBridge: NSObject {
         var args = arguments
         if let bridgeHandle { args["bridge"] = bridgeHandle }
         let generation = pageGeneration
+        let frame = activeFrame.flatMap { $0.info.isMainFrame ? nil : $0.info }
         webView.callAsyncJavaScript("if (\(target)) { return \(target).\(body); }",
-                                    arguments: args, in: nil, in: .page) { [weak self] result in
+                                    arguments: args, in: frame, in: .page) { [weak self] result in
             if case .failure(let error) = result {
-                print("[bridge] call failed: \(error.localizedDescription)")
+                let detail = (error as NSError).userInfo["WKJavaScriptExceptionMessage"] as? String ?? error.localizedDescription
+                print("[bridge] call failed \(body.prefix { $0 != "(" }): \(detail)")
             }
             guard let self, self.pageGeneration == generation else { return }
             completion?()
@@ -101,7 +117,8 @@ final class ARBridge: NSObject {
     func resetPageState() {
         pageGeneration += 1
         stopStreaming()
-        bridgeHandle = nil
+        frames.removeAll()
+        activeFrameKey = nil
         pageReady = false
         pageAnchors.values.forEach(session.remove(anchor:))
         pageAnchors.removeAll()
@@ -123,8 +140,9 @@ extension ARBridge: WKScriptMessageHandlerWithReply {
     func userContentController(_ userContentController: WKUserContentController,
                                didReceive message: WKScriptMessage,
                                replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void) {
-        // Iframes (ads, embeds) share the page world but must not drive the camera or the handle.
-        guard message.frameInfo.isMainFrame else {
+        // Cross-origin iframes (ads, embeds) share the page world but must not drive the camera.
+        guard accepts(message.frameInfo) else {
+            print("[bridge] rejected message from \(BridgeOrigin(message.frameInfo.securityOrigin)) (main \(mainOrigin?.description ?? "none"))")
             replyHandler(nil, "holoweb bridge is available to the main frame only")
             return
         }
@@ -134,22 +152,32 @@ extension ARBridge: WKScriptMessageHandlerWithReply {
         }
         switch type {
         case "ready":
-            bridgeHandle = body["bridge"] as? WKJSHandle
+            let key = Self.frameKey(body, message.frameInfo)
+            let handle = body["bridge"] as? WKJSHandle
+            frames[key] = BridgeFrame(handle: handle, info: message.frameInfo)
+            if activeFrameKey == nil || frames[activeFrameKey!] == nil { activeFrameKey = key }
             pageReady = true
-            print("[bridge] ready, transport: \(bridgeHandle != nil ? "WKJSHandle" : "window.__holoweb")")
+            print("[bridge] ready \(key)\(message.frameInfo.isMainFrame ? "" : " (iframe)"), transport: \(handle != nil ? "WKJSHandle" : "window.__holoweb")")
             replyHandler(["ok": true, "device": DeviceInfo.current.dictionary,
                           "mode": state?.mode.rawValue ?? "mono",
-                          "transport": bridgeHandle != nil ? "jshandle" : "global"], nil)
+                          "transport": handle != nil ? "jshandle" : "global"], nil)
         case "requestSession":
             guard let state else { return replyHandler(nil, "app state unavailable") }
+            let key = Self.frameKey(body, message.frameInfo)
+            if frames[key] != nil { activeFrameKey = key }
             let features = body["features"] as? [String] ?? []
             print("[bridge] requestSession features=\(features.joined(separator: ","))")
-            state.xrSessionStarted()
+            state.xrSessionStarted(features: Set(features))
             streaming = true
             planesDirty = true
             anchorsDirty = true
             environmentDirty = true
             environmentRequested = features.contains("light-estimation")
+            handsRequested = features.contains("hand-tracking")
+            handStats = HandStats()
+            meshesRequested = features.contains("mesh-detection")
+            if meshesRequested { meshStreamer.markAllDirty() }
+            visibility = "visible"
             replyHandler(["ok": true, "mode": state.mode.rawValue, "frameRate": 60], nil)
         case "endSession":
             stopStreaming()
@@ -231,6 +259,7 @@ extension ARBridge: WKNavigationDelegate {
     /// leaves the old page (and its bridge) in place.
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         resetPageState()
+        mainOrigin = BridgeOrigin(webView.url)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

@@ -134,11 +134,13 @@ class Renderer {
             //   we use from the CVMetalTextures are not valid unless their parent CVMetalTextures
             //   are retained. Since we may release our CVMetalTexture ivars during the rendering
             //   cycle, we must retain them separately here.
+            // The semaphore is captured strongly: a DispatchSemaphore released while below its
+            //   initial value traps, which happened when the Metal view was torn down (AR exit)
+            //   with a frame still on the GPU.
             var textures = [capturedImageTextureY, capturedImageTextureCbCr]
-            commandBuffer.addCompletedHandler{ [weak self] commandBuffer in
-                if let strongSelf = self {
-                    strongSelf.inFlightSemaphore.signal()
-                }
+            let semaphore = inFlightSemaphore
+            commandBuffer.addCompletedHandler { _ in
+                semaphore.signal()
                 textures.removeAll()
             }
             
@@ -162,6 +164,8 @@ class Renderer {
             
             // Finalize rendering here & push the command buffer to the GPU
             commandBuffer.commit()
+        } else {
+            inFlightSemaphore.signal()
         }
     }
     
