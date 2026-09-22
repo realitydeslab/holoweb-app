@@ -649,3 +649,17 @@ Changes:
 - SuperSplat: AR button clicked, no session requested, no error → polyfill investigating.
 - Babylon playground: the playground itself timed out preparing the runnable (before any AR button) → retry in final baseline.
 - Run: `Scripts/run-targets.py threejs-bundled gallery` → 44/52.
+
+## Native: geometric hand chirality (2026-09-22 late)
+Vision's chirality is wrong for first-person rear-camera views. On the Mac, scratchpad/hands/first-person-two-hands.jpg (backs of a left and a right hand) returns right and right.
+
+HandTracker now derives handedness from geometry. With a = indexMCP − wrist and b = littleMCP − wrist in Vision's y-up coordinates on the unmirrored capturedImage, s = a.x·b.y − a.y·b.x. s > 0 means left, assuming the back of the hand faces the camera. The sign survives rotation, so sensor vs display orientation does not matter. Vision's label is kept as `visionChirality`, and hands are no longer dropped when Vision says unknown.
+
+Mac check (scratchpad/chir.swift):
+- first-person: x=0.21 → left (s=+0.047), x=0.81 → right (s=−0.048); Vision said right and right.
+- front-back: x=0.23 left, x=0.79 right; Vision said right and right.
+- Palm-facing photos read as the opposite hand, as expected, because the rule assumes the back of the hand.
+
+Device (show.sh hands2, hands-check.html):
+- hands.chirality-first-person 178/178. The phone's Vision said "right,left" for the same view, so it is inconsistent even between devices.
+- 22.2 results/s, Vision 18–20 ms with two hands, 21/21 joints with measured depth, depth spread 3.0 cm (flat photo), wrist 0.38 m.

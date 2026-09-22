@@ -8,7 +8,8 @@ import Vision
 /// 3D hand joints for `bridge.onHands` (plan/bridge_protocol.md, plan/samples_requirements.md G10).
 ///
 /// Vision finds 21 2D joints per hand in `ARFrame.capturedImage` (orientation `.up`: the buffer is
-/// in sensor orientation, the same frame as the intrinsics) on a serial background queue. Each
+/// in sensor orientation, the same frame as the intrinsics) on a serial background queue.
+/// Handedness comes from hand geometry (see `firstPersonHandedness`), not Vision's chirality. Each
 /// joint is lifted to 3D with the LiDAR depth map: a 3x3 median of medium/high-confidence pixels,
 /// clamped to the palm depth +- 8 cm, since thin fingers often sample the background at their
 /// silhouette. Joints are unprojected with the intrinsics and moved to world space with the raw
@@ -22,6 +23,8 @@ final class HandTracker {
         let confidence: [Double]
         /// Bit i set: joint i has measured depth (not inferred from the palm).
         let depthValid: Int
+        /// Vision's own chirality label, for debugging only (unreliable for this view).
+        let visionChirality: String
     }
 
     struct Result: Sendable {
@@ -104,14 +107,13 @@ final class HandTracker {
 
     private nonisolated static func hand(from observation: VNHumanHandPoseObservation, input: Input,
                                          depth: DepthSampler?, memory: DepthMemory) -> Hand? {
-        // The rear camera does not mirror, so Vision's label is the user's hand (verify on device).
-        let handedness: String
-        switch observation.chirality {
-        case .left: handedness = "left"
-        case .right: handedness = "right"
-        default: return nil
+        guard let points = try? observation.recognizedPoints(.all),
+              let handedness = firstPersonHandedness(points) else { return nil }
+        let visionChirality = switch observation.chirality {
+        case .left: "left"
+        case .right: "right"
+        default: "unknown"
         }
-        guard let points = try? observation.recognizedPoints(.all) else { return nil }
         // Normalised, origin bottom-left -> normalised, origin top-left (same as the pixel buffer).
         let image = jointNames.map { name -> simd_float2 in
             guard let p = points[name] else { return simd_float2(0.5, 0.5) }
@@ -143,7 +145,25 @@ final class HandTracker {
             joints += [Double(world.x), Double(world.y), Double(world.z)]
         }
         guard joints.allSatisfy(\.isFinite) else { return nil }
-        return Hand(handedness: handedness, joints: joints, confidence: confidence, depthValid: depthValid)
+        return Hand(handedness: handedness, joints: joints, confidence: confidence, depthValid: depthValid,
+                    visionChirality: visionChirality)
+    }
+
+    /// Handedness from the hand's geometry, not Vision's chirality: Vision labels both hands of a
+    /// first-person rear-camera view "right" (scratchpad fixture first-person-two-hands.jpg).
+    /// The rear camera sees the BACK of the user's hands (handheld AR, HoloKit). With
+    /// a = indexMCP - wrist and b = littleMCP - wrist in Vision's coordinates (normalised, y up,
+    /// in capturedImage, which is not mirrored), s = a.x*b.y - a.y*b.x is positive for the back of
+    /// a left hand (index knuckle to the right of the little one when the fingers point up) and
+    /// negative for the back of a right hand. The sign of a cross product survives rotation, so
+    /// the sensor-vs-display orientation does not matter; only mirroring would flip it.
+    /// A palm facing the camera reads as the other hand; that view is not first-person.
+    private nonisolated static func firstPersonHandedness(_ points: [VNHumanHandPoseObservation.JointName: VNRecognizedPoint]) -> String? {
+        guard let wrist = points[.wrist], let index = points[.indexMCP], let little = points[.littleMCP] else { return nil }
+        let a = CGPoint(x: index.location.x - wrist.location.x, y: index.location.y - wrist.location.y)
+        let b = CGPoint(x: little.location.x - wrist.location.x, y: little.location.y - wrist.location.y)
+        let s = a.x * b.y - a.y * b.x
+        return s > 0 ? "left" : "right"
     }
 }
 
@@ -222,7 +242,7 @@ extension ARBridge {
                   !self.handStats.inFlight else { return }
             let hands: [[String: Any]] = result.hands.map {
                 ["handedness": $0.handedness, "joints": $0.joints, "confidence": $0.confidence,
-                 "depthValid": $0.depthValid]
+                 "depthValid": $0.depthValid, "visionChirality": $0.visionChirality]
             }
             self.handStats.inFlight = true
             self.call("onHands(update)", ["update": ["t": result.t, "hands": hands] as [String: Any]]) { [weak self] in

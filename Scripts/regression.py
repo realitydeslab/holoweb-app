@@ -12,6 +12,8 @@ Usage:
   Scripts/regression.py --skip-polyfill # native + device only
   Scripts/regression.py --device <UDID> # pick a specific phone
   Scripts/regression.py --no-device     # CI-style: polyfill + builds only
+  Scripts/regression.py --skip-polyfill --skip-builds --only gallery,threejs-bundled
+                                        # app already installed; only those device groups
 
 Exit code 0 only if every executed check passed. Stdlib only.
 """
@@ -25,9 +27,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from regression_targets import (ENVIRONMENT, IFRAME, IMAGE_RUN, IMAGE_TRACKED, IMMERSIVE_WEB,
-                                IMMERSIVE_WEB_SAMPLES, PLANES, SAMPLE_BUTTON, SAMPLE_INTENDED_ERRORS,
-                                SET_IMAGES, Expect)
+from regression_targets import GROUPS, Target
 
 ROOT = Path(__file__).resolve().parent.parent
 POLYFILL = ROOT / "polyfill"
@@ -159,16 +159,14 @@ def toggle_run(report: Report, device: str, page: str, label: str, seconds: int 
     report.add(f"device.{label}.no-page-errors", not errors, "; ".join(errors[:2]))
 
 
-def third_party_run(report: Report, device: str, url: str, label: str, seconds: int = 30,
-                    click: str = "#ARButton", features: tuple[str, ...] = (),
-                    expect: tuple[Expect, ...] = (), ignore_errors: str | None = None,
-                    human: tuple[Expect, ...] = ()) -> None:
-    """Opens a third-party WebXR page, presses its AR button (CSS selector, or "js:<expr>" for
-    canvas-drawn buttons; same-origin iframes are searched too), checks AR entry and streaming,
-    that `features` were requested, and that each `expect` line was logged. Page errors matching
-    `ignore_errors` (a regex) are the page's own, intended behaviour."""
-    log = launch(device, {"HOLOWEB_URL": url, "HOLOWEB_TEST_CLICK": click}, seconds)
-    name = f"device.{label}"
+def third_party_run(report: Report, device: str, target: Target) -> None:
+    """Opens a WebXR page, presses its AR control (see `Target`), checks AR entry and streaming,
+    that `target.features` were requested, and that each `target.expect` line was logged. Page
+    errors matching `target.ignore_errors` (a regex) are the page's own, intended behaviour."""
+    where = {"HOLOWEB_URL": target.url} if "://" in target.url else {"HOLOWEB_PAGE": target.url}
+    log = launch(device, {**where, "HOLOWEB_TEST_CLICK": target.click}, target.seconds)
+    name = f"device.{target.label}"
+    features, expect, human, ignore_errors = target.features, target.expect, target.human, target.ignore_errors
     clicked = re.search(r"\[test\] (clicked|no element) (.*)", log)
     report.add(f"{name}.clicked", bool(clicked) and clicked.group(1) == "clicked",
                clicked.group(0) if clicked else "no [test] line (page never finished loading?)")
@@ -219,9 +217,12 @@ def hands_run(report: Report, device: str, seconds: int = 22) -> None:
     failures = re.findall(r"\[bridge\] (?:call failed onHands|hand pose request failed)[^\n]*", log)
     report.add("device.hands.no-errors", not failures, "; ".join(failures[:2]))
     if seen.get("hands.in-view", (False, ""))[0]:
-        for name in ["hands.shape", "hands.hand-rate", "hands.plausible-size"]:
+        for name in ["hands.shape", "hands.hand-rate", "hands.plausible-size", "hands.chirality-first-person"]:
             ok, detail = seen.get(name, (False, "no result"))
-            report.add(f"device.{name}", ok, detail)
+            if detail.startswith("needs "):
+                print(f"  INFO  device.{name}  {detail} (show.sh hands2)", flush=True)
+            else:
+                report.add(f"device.{name}", ok, detail)
     else:
         print("  INFO  device.hands.*  no hand in view; hold a hand in front of the rear camera to run "
               "hands.shape / hand-rate / plausible-size", flush=True)
@@ -268,21 +269,60 @@ def image_run(report: Report, device: str, seconds: int = 30) -> None:
               "camera for results-shape / width / axes", flush=True)
 
 
-def stage_device(report: Report, device: str) -> None:
+# Device-stage groups outside regression_targets.GROUPS.
+LOCAL_GROUPS = ["pages", "toggle", "sensors", "shell"]
+
+
+def selected(group: str, only: list[str] | None) -> bool:
+    """True if `group` runs: no --only filter, or one of its substrings occurs in the name."""
+    return not only or any(part in group for part in only)
+
+
+def stage_device(report: Report, device: str, only: list[str] | None = None, install: bool = True) -> None:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from importlib import import_module
     lock = import_module("device-lock").device_lock
     print(f"\n[3/3] device {device}", flush=True)
     with lock():
-        _stage_device(report, device)
+        _stage_device(report, device, only, install)
 
 
-def _stage_device(report: Report, device: str) -> None:
-    install = run(["xcrun", "devicectl", "device", "install", "app", "--device", device, str(app_path())])
-    report.add("device.install", install.returncode == 0, tail(install.stderr, 3) if install.returncode else "")
-    if install.returncode:
+def _stage_device(report: Report, device: str, only: list[str] | None, install: bool) -> None:
+    if install:
+        proc = run(["xcrun", "devicectl", "device", "install", "app", "--device", device, str(app_path())])
+        report.add("device.install", proc.returncode == 0, tail(proc.stderr, 3) if proc.returncode else "")
+        if proc.returncode:
+            return
+
+    if selected("pages", only):
+        bundled_page_checks(report, device)
+    if selected("toggle", only):
+        toggle_run(report, device, "examples/three-ar.html?autostart", "three-webgl")
+        toggle_run(report, device, "examples/three-ar-webgpu.html?autostart", "three-webgpu")
+    if selected("sensors", only):
+        hands_run(report, device)
+        mesh_run(report, device)
+        image_run(report, device)
+
+    for group, targets in GROUPS.items():
+        if selected(group, only):
+            for target in targets:
+                third_party_run(report, device, target)
+
+    if not selected("shell", only):
         return
+    log = launch(device, {"HOLOWEB_PAGE": "examples/demo.html"}, 10)
+    report.add("device.browsing-without-session",
+               "phase -> browsing" in log and "phase -> arMono" not in log)
 
+    target = "https://immersive-web.github.io/webxr-samples/immersive-ar-session.html"
+    link = "https://holoweb.app/launch?url=" + target.replace(":", "%3A").replace("/", "%2F")
+    log = launch(device, {"HOLOWEB_URL": link}, 12)
+    report.add("device.in-app-link-interception", f"[state] load {target}" in log)
+
+
+def bundled_page_checks(report: Report, device: str) -> None:
+    """Raw-bridge and polyfill check pages bundled under Web/."""
     page_checks(report, device, "webgpu-check.html", 14, [
         "webgpu.navigator-gpu", "webxr.navigator-xr", "webkit.create-js-handle",
         "webgl2.draw", "webgpu.copy-to-canvas-presenter"])
@@ -302,66 +342,27 @@ def _stage_device(report: Report, device: str) -> None:
         "env.received", "env.shape", "env.not-blank", "env.rate", "planes.received",
         "planes.polygon-shape", "planes.polygon-ccw", "planes.polygon-in-extent", "planes.last-changed"])
 
-    toggle_run(report, device, "examples/three-ar.html?autostart", "three-webgl")
-    toggle_run(report, device, "examples/three-ar-webgpu.html?autostart", "three-webgpu")
-
-    hands_run(report, device)
-    mesh_run(report, device)
-    image_run(report, device)
-
-    examples = "https://threejs.org/examples/"
-    third_party_run(report, device, examples + "webxr_ar_hittest.html", "three-hittest")
-    third_party_run(report, device, examples + "webxr_ar_plane_detection.html", "three-plane-detection",
-                    features=("plane-detection",), expect=(PLANES,))
-    third_party_run(report, device, examples + "webxr_ar_lighting.html", "three-lighting",
-                    features=("light-estimation",), expect=(ENVIRONMENT,))
-    # PlayCanvas runs the app in a same-origin iframe and draws its AR button on the canvas.
-    third_party_run(report, device, "https://playcanv.as/p/AOYF3YyG/", "playcanvas-iframe",
-                    click="js:window.pc && pc.Application.getApplication() && "
-                          "(pc.Application.getApplication().fire('ar:request:start'), true)",
-                    expect=(IFRAME,))
-    # Image tracking: PlayCanvas (canvas button in a same-origin iframe), Needle (button in a
-    # shadow root; engine.needle.tools/samples/image-tracking/ embeds this app in a cross-origin
-    # iframe, which the bridge refuses, so the app URL is tested directly), our example page.
-    third_party_run(report, device, "https://playcanv.as/p/PCsSvN5h/", "playcanvas-image-tracking",
-                    click="js:(a => { const s = a && a.root.findComponents('script').find(c => c.xrBasic); "
-                          "if (!s) return false; s.xrBasic.button.element.fire('click'); return true; })"
-                          "(window.pc && pc.Application.getApplication())",
-                    features=("image-tracking",), expect=(SET_IMAGES, IMAGE_RUN), human=(IMAGE_TRACKED,))
-    third_party_run(report, device, "https://image-tracking-zubckszr0qj2.needle.run/", "needle-image-tracking",
-                    click='[data-needle="webxr-ar-button"]',
-                    features=("image-tracking",), expect=(SET_IMAGES, IMAGE_RUN), human=(IMAGE_TRACKED,))
-    third_party_run(report, device, "holoweb-app://local/examples/image-tracking.html?autostart&stats",
-                    "example-image-tracking", click="js:true",
-                    features=("image-tracking",), expect=(SET_IMAGES, IMAGE_RUN), human=(IMAGE_TRACKED,))
-    for path, label, features, expect in IMMERSIVE_WEB_SAMPLES:
-        third_party_run(report, device, IMMERSIVE_WEB + path, label, click=SAMPLE_BUTTON,
-                        features=features, expect=expect, ignore_errors=SAMPLE_INTENDED_ERRORS.get(label))
-
-    log = launch(device, {"HOLOWEB_PAGE": "examples/demo.html"}, 10)
-    report.add("device.browsing-without-session",
-               "phase -> browsing" in log and "phase -> arMono" not in log)
-
-    target = "https://immersive-web.github.io/webxr-samples/immersive-ar-session.html"
-    link = "https://holoweb.app/launch?url=" + target.replace(":", "%3A").replace("/", "%2F")
-    log = launch(device, {"HOLOWEB_URL": link}, 12)
-    report.add("device.in-app-link-interception", f"[state] load {target}" in log)
-
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--device", help="UDID of the iPhone to test on (default: first connected iOS 27+ phone)")
     parser.add_argument("--no-device", action="store_true", help="skip the on-device stage")
     parser.add_argument("--skip-polyfill", action="store_true", help="skip polyfill tests/build")
+    parser.add_argument("--skip-builds", action="store_true",
+                        help="skip Xcode builds and the app install (the app is already on the phone)")
+    parser.add_argument("--only", help="comma-separated substrings of device groups to run: "
+                        + ", ".join(LOCAL_GROUPS + list(GROUPS)))
     args = parser.parse_args()
+    only = [part.strip() for part in args.only.split(",") if part.strip()] if args.only else None
 
     report = Report()
     device = None if args.no_device else (args.device or connected_ios27_device())
     if not args.skip_polyfill:
         stage_polyfill(report)
-    stage_build(report, device)
+    if not args.skip_builds:
+        stage_build(report, device)
     if device and not report.failed:
-        stage_device(report, device)
+        stage_device(report, device, only, install=not args.skip_builds)
     elif device:
         print("\n[3/3] device stage skipped: earlier stages failed", flush=True)
     else:
