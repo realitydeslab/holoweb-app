@@ -7,7 +7,7 @@ import type { HoloWebGlobal } from '../src/index.js';
 
 type Msg = Record<string, unknown> & { type: string };
 interface View { eye: string; isFirstPersonObserver: boolean }
-interface Source { targetRayMode: string; profiles: string[]; handedness: string }
+interface Source { targetRayMode: string; profiles: string[]; handedness: string; gripSpace?: unknown; gamepad?: unknown; hand?: unknown }
 interface Frame { getViewerPose(space: unknown): { views: View[] } }
 interface Session extends EventTarget {
   environmentBlendMode: string;
@@ -154,6 +154,9 @@ describe('WebXR AR Module conformance', () => {
       const source = session.inputSources[0];
       expect(source).toMatchObject({ targetRayMode: 'screen', handedness: 'none' });
       expect(source.profiles).toContain('generic-touchscreen');
+      // like Chrome Android: no grip, gamepad or hand (three's XRControllerModelFactory skips it; pages that
+      // only build visuals for 'tracked-pointer' / 'gaze', e.g. webxr_xr_ballshooter, add nothing)
+      expect([source.gripSpace ?? null, source.gamepad ?? null, source.hand ?? null]).toEqual([null, null, null]);
       await inFrame(session);
       window.dispatchEvent(new PointerEvent('pointerup'));
       await inFrame(session);

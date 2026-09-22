@@ -105,7 +105,9 @@ GROUPS: dict[str, list[Target]] = {
         Target("gallery-babylon", "https://playground.babylonjs.com/full.html#GG06BQ#97",
                click=".xr-button-overlay button", seconds=40),
         # three.js XRButton offers immersive-ar first.
-        Target("gallery-ballshooter", THREE + "webxr_xr_ballshooter.html", click="#XRButton"),
+        Target("gallery-ballshooter", THREE + "webxr_xr_ballshooter.html", click="#XRButton",
+               # The page's buildController() returns undefined for screen (tap) input sources, same in Chrome Android.
+               ignore_errors=r"Object3D\.add: object not an instance of THREE\.Object3D"),
     ],
     # (path, required requestSession features, expected log lines). Known gaps per page are in
     # plan/samples_requirements.md. tests/interrupted-ar deliberately throws `new Exception(...)`.
