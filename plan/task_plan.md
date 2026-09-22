@@ -8,7 +8,8 @@ Deliver an executable plan for HoloWeb: (1) iOS app + App Clip that loads a webp
 - [x] Phase 2: Research — iOS 27 WKWebView WebGPU, WebXR polyfill candidates (webxr-polyfill, webxr-ios-js, IWER, Variant Launch), App Clip constraints
 - [x] Phase 3: Design bridge architecture (message protocol, frame loop, stereo/mono view math, compositing)
 - [x] Phase 4: Write deliverable plan/holoweb_plan.md with milestones + verification
-- [ ] Phase 5: Review and deliver summary
+- [x] Phase 5: Review and deliver summary
+- [x] Execution: M0 cleanup, M1 WebGPU check, M2 polyfill, M3/M3b bridge + camera sync, M4 XRGPUBinding, M5 stereo (math + prediction), M6 App Clip, M7 anchors/light/floor — all verified on iPhone 15 Pro iOS 27 (see notes.md logs)
 
 ## Key Questions
 1. Does WKWebView on iOS 27 expose navigator.gpu (WebGPU)? Any feature flag needed?
@@ -30,4 +31,4 @@ Deliver an executable plan for HoloWeb: (1) iOS app + App Clip that loads a webp
 - 2026-09-22: M0 project cleanup done by orchestrator (aaa target removed, deployment target 27.0, Swift consolidated, scratch dirs moved to session scratchpad). Metal toolchain component downloaded. User requires min iOS 27, WKJSHandle transport, Opus subagents for implementation. Protocol in plan/bridge_protocol.md.
 
 ## Status
-**Phase 5 in progress** - plan written to plan/holoweb_plan.md; delivering summary
+**Automatable work complete.** Remaining items need a person with the phone/HoloKit or a product decision: HoloKit X optical alignment + prediction tuning, visual mono alignment, tap-to-place on a real floor, rotation mid-session, AASA deploy + App Store Connect App Clip experience + TestFlight, consent/origin display for third-party pages, optional CoreMotion gyro prediction (full app only).
