@@ -2,6 +2,7 @@
 import type { NativeAnchorData } from './anchors.js';
 import { devicePixelRatioOrOne } from './device.js';
 import type { NativeHandData } from './hand-input.js';
+import type { NativeMeshUpdate } from './meshes.js';
 import type { NativePlaneData } from './hittest.js';
 import type { NativeEnvironment } from './reflection.js';
 import type { PixelRect } from './stereo.js';
@@ -70,6 +71,7 @@ export interface NativeCallbacks {
   onHands(hands: NativeHandData[]): void;
   onEnvironment(environment: NativeEnvironment): void;
   onVisibility(state: 'visible' | 'visible-blurred' | 'hidden'): void;
+  onMeshes(update: NativeMeshUpdate): void;
   onSessionEnded(reason?: string): void;
 }
 
@@ -104,4 +106,15 @@ export function scaleRect(r: PixelRect, sx: number, sy: number): PixelRect {
     width: Math.round(r.width * sx),
     height: Math.round(r.height * sy),
   };
+}
+
+/** Device capabilities from the `ready` reply (G13): LiDAR scene reconstruction and scene depth. */
+export interface Capabilities {
+  sceneReconstruction: boolean;
+  sceneDepth: boolean;
+}
+
+export function parseCapabilities(v: unknown): Capabilities | undefined {
+  if (!isRecord(v)) return undefined;
+  return { sceneReconstruction: v.sceneReconstruction === true, sceneDepth: v.sceneDepth === true };
 }

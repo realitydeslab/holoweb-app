@@ -53,6 +53,8 @@ export class XRGPUProjectionLayer extends EventTarget {
     readonly session: XRSession,
     readonly colorTexture: GPUTexture,
     readonly colorFormat: GPUTextureFormat,
+    /** Allocated when the page passes depthStencilFormat (2 layers, same size as the colour). */
+    readonly depthStencilTexture: GPUTexture | null = null,
   ) {
     super();
   }
@@ -67,11 +69,11 @@ export class XRGPUProjectionLayer extends EventTarget {
 
   destroy(): void {
     this.colorTexture.destroy();
+    this.depthStencilTexture?.destroy();
   }
 }
 
 export class XRGPUSubImage {
-  readonly depthStencilTexture: GPUTexture | null = null;
   readonly motionVectorTexture: GPUTexture | null = null;
 
   constructor(
@@ -79,6 +81,7 @@ export class XRGPUSubImage {
     readonly viewport: XRViewport,
     readonly imageIndex: number,
     readonly colorTextureFormat: GPUTextureFormat,
+    readonly depthStencilTexture: GPUTexture | null = null,
   ) {}
 
   getViewDescriptor(): GPUTextureViewDescriptor {
@@ -163,7 +166,17 @@ export class XRGPUBinding {
       format: init.colorFormat,
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC,
     });
-    const layer = new XRGPUProjectionLayer(session, texture, init.colorFormat);
+    // Spec behaviour: a depth/stencil texture array when asked for. three.js allocates its own depth
+    // (no depthStencilFormat); renderers that size depth from the viewport need ours to match.
+    const depth = init.depthStencilFormat
+      ? this.device.createTexture({
+          label: 'holoweb-xr-projection-layer-depth',
+          size: { width: size.width, height: size.height, depthOrArrayLayers: 2 },
+          format: init.depthStencilFormat,
+          usage: GPUTextureUsage.RENDER_ATTACHMENT,
+        })
+      : null;
+    const layer = new XRGPUProjectionLayer(session, texture, init.colorFormat, depth);
     this.presentation(init.colorFormat).layers.add(layer);
     return layer;
   }
@@ -177,7 +190,7 @@ export class XRGPUBinding {
     // views.ts' inert 2nd view in mono gets a 0x0 viewport, like XRWebGLLayer.getViewport.
     const inert = eye === 'right' && !this.session[P_SESSION].device.stereoEnabled;
     const viewport = inert ? new XRViewport(0, 0, 0, 0) : new XRViewport(0, 0, layer.textureWidth, layer.textureHeight);
-    return new XRGPUSubImage(layer.colorTexture, viewport, eye === 'right' ? 1 : 0, layer.colorFormat);
+    return new XRGPUSubImage(layer.colorTexture, viewport, eye === 'right' ? 1 : 0, layer.colorFormat, layer.depthStencilTexture);
   }
 
   private presentation(format: GPUTextureFormat): Presentation {
@@ -206,6 +219,8 @@ export class XRGPUBinding {
 
 /** True while three.js' WebGPU descriptor cache may still hold a 1-view descriptor (views.ts). */
 export function needsPrimingView(session: XRSession): boolean {
+  // three.js-specific (it sets globalThis.__THREE__); other WebGPU renderers get a plain single view.
+  if (typeof (globalThis as { __THREE__?: unknown }).__THREE__ === 'undefined') return false;
   return (session.renderState.layers ?? []).some((l) => l instanceof XRGPUProjectionLayer && l.twoViewFrames < PRIME_FRAMES);
 }
 

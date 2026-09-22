@@ -5,6 +5,7 @@
  * gradient cube faces in the native onEnvironment format.
  */
 import { mat4 } from 'gl-matrix';
+import { encodeBase64 } from './base64.js';
 import type { NativePlaneData } from './hittest.js';
 import type { NativeEnvironment } from './reflection.js';
 
@@ -66,12 +67,6 @@ function gradient(h: number, shift: number): [number, number, number] {
   return [0, 1, 2].map((c) => Math.round((a[c] + (b[c] - a[c]) * t) * shift)) as [number, number, number];
 }
 
-function toBase64(bytes: Uint8Array): string {
-  let s = '';
-  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
-  return btoa(s);
-}
-
 /** Cube faces +X -X +Y -Y +Z -Z (OpenGL orientation, row 0 = top); `shift` tints later maps. */
 export function mockEnvironment(size = 32, shift = 1, timestamp = 0): NativeEnvironment {
   const faces: string[] = [];
@@ -86,7 +81,33 @@ export function mockEnvironment(size = 32, shift = 1, timestamp = 0): NativeEnvi
         bytes.set([r, g, b, 255], (row * size + col) * 4);
       }
     }
-    faces.push(toBase64(bytes));
+    faces.push(encodeBase64(bytes));
   }
   return { size, format: 'rgba8', colorSpace: 'srgb', faces, timestamp };
+}
+
+/** Axis-aligned box mesh (mesh-local, centred), 8 vertices / 12 triangles, as native base64. */
+function boxGeometry(sx: number, sy: number, sz: number): { vertices: string; indices: string } {
+  const v: number[] = [];
+  for (const x of [-sx / 2, sx / 2]) for (const y of [-sy / 2, sy / 2]) for (const z of [-sz / 2, sz / 2]) v.push(x, y, z);
+  // faces of the unit-cube index layout (x*4 + y*2 + z)
+  const faces = [[0, 1, 3, 2], [4, 6, 7, 5], [0, 4, 5, 1], [2, 3, 7, 6], [0, 2, 6, 4], [1, 5, 7, 3]];
+  const idx = faces.flatMap(([a, b, c, d]) => [a, b, c, a, c, d]);
+  return {
+    vertices: encodeBase64(new Uint8Array(new Float32Array(v).buffer)),
+    indices: encodeBase64(new Uint8Array(new Uint32Array(idx).buffer)),
+  };
+}
+
+/** Mock scene-reconstruction update: a table box and a floor patch; `grown` enlarges the table. */
+export function mockMeshes(grown: boolean, now: number): { meshes: object[]; removed: string[] } {
+  const table = boxGeometry(grown ? 0.8 : 0.6, 0.05, 0.6);
+  const floor = boxGeometry(2, 0.01, 2);
+  return {
+    meshes: [
+      { id: 'mesh-table', transform: Array.from(mat4.fromTranslation(mat4.create(), [-0.5, -0.6, -1.5])), ...table, lastChanged: grown ? now : 0, semanticLabel: 'table' },
+      ...(grown ? [] : [{ id: 'mesh-floor', transform: Array.from(mat4.fromTranslation(mat4.create(), [0, -1.3, -1.5])), ...floor, lastChanged: 0, semanticLabel: 'floor' }]),
+    ],
+    removed: [],
+  };
 }

@@ -66,6 +66,7 @@ beforeAll(async () => {
   Object.defineProperty(navigator, 'gpu', { configurable: true, value: { getPreferredCanvasFormat: () => 'bgra8unorm' } });
   (globalThis as Record<string, unknown>).GPUTextureUsage = { RENDER_ATTACHMENT: 16, TEXTURE_BINDING: 4, COPY_SRC: 1, COPY_DST: 2 };
   (globalThis as Record<string, unknown>).WebGL2RenderingContext = class {};
+  (globalThis as Record<string, unknown>).__THREE__ = '186'; // three.js sets this; priming is three-only
   // A fake native transport: without window.webkit the polyfill would start the desktop mock, whose
   // 60 Hz mono frames race with this test's own onFrame pushes (the source of an earlier flake).
   (globalThis as Record<string, unknown>).webkit = {
@@ -128,5 +129,42 @@ describe('XRGPUBinding mono <-> stereo mid-session', () => {
     expect(lastViewports[0].width * lastViewports[0].height).toBeGreaterThan(0);
     expect([lastViewports[1].width, lastViewports[1].height]).toEqual([0, 0]); // inert view: 0x0 sub-image
     await session.end();
+  });
+});
+
+describe('G12: non-three renderers and depthStencilTexture', () => {
+  it('gives a non-three page a plain single view in mono (no priming view)', async () => {
+    delete (globalThis as Record<string, unknown>).__THREE__;
+    const xr = (navigator as unknown as { xr: { requestSession(m: string, i: object): Promise<Session> } }).xr;
+    const s2 = await xr.requestSession('immersive-ar', { optionalFeatures: ['webgpu'] });
+    try {
+      push('mono');
+      const Binding = (globalThis as unknown as { XRGPUBinding: new (s: Session, d: unknown) => typeof binding }).XRGPUBinding;
+      const b2 = new Binding(s2, fakeDevice);
+      s2.updateRenderState({ layers: [b2.createProjectionLayer({ colorFormat: 'bgra8unorm' })] });
+      const local = await s2.requestReferenceSpace('local');
+      await new Promise<void>((r) => s2.requestAnimationFrame(() => r()));
+      const eyes = await new Promise<string[]>((r) => s2.requestAnimationFrame((_t, f) => r(f.getViewerPose(local).views.map((v) => v.eye))));
+      expect(eyes).toEqual(['none']);
+    } finally {
+      (globalThis as Record<string, unknown>).__THREE__ = '186';
+      await s2.end();
+    }
+  });
+
+  it('allocates a 2-layer depthStencilTexture only when the page asks for one', async () => {
+    const xr = (navigator as unknown as { xr: { requestSession(m: string, i: object): Promise<Session> } }).xr;
+    const s3 = await xr.requestSession('immersive-ar', { optionalFeatures: ['webgpu'] });
+    try {
+      const Binding = (globalThis as unknown as { XRGPUBinding: new (s: Session, d: unknown) => { createProjectionLayer(i: object): unknown; getViewSubImage(l: unknown, v: View): { depthStencilTexture: { width: number } | null } } }).XRGPUBinding;
+      const b3 = new Binding(s3, fakeDevice);
+      const withDepth = b3.createProjectionLayer({ colorFormat: 'bgra8unorm', depthStencilFormat: 'depth24plus' });
+      const without = b3.createProjectionLayer({ colorFormat: 'bgra8unorm' });
+      const view = { eye: 'none', projectionMatrix: new Float32Array(16) } as View;
+      expect(b3.getViewSubImage(withDepth, view).depthStencilTexture?.width).toBeGreaterThan(0);
+      expect(b3.getViewSubImage(without, view).depthStencilTexture).toBeNull();
+    } finally {
+      await s3.end();
+    }
   });
 });

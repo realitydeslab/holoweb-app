@@ -69,6 +69,28 @@ const SAMPLES = {
       return `anchors=${anchors}`;
     },
   },
+  'proposals/mesh-detection': {
+    // three r152 (G1), dom-overlay root = body (G6), required mesh-detection (G9 + G13 capabilities)
+    async run(page, problems) {
+      await page.waitForTimeout(700);
+      const state = await page.evaluate(() => ({
+        meshes: window.__holoweb.meshes.count,
+        features: [...window.__holoweb.bridge.device.activeSession.enabledFeatures],
+      }));
+      const header = await page.evaluate(() => {
+        const h = document.querySelector('header');
+        if (!h) return 'no header';
+        const r = h.getBoundingClientRect();
+        const top = document.elementFromPoint(r.left + r.width / 2, r.top + Math.min(r.height / 2, 20));
+        return h.contains(top) ? 'on top' : `covered by ${top?.tagName}`;
+      });
+      await tap(page, 1); // selectstart/selectend drive the page's mesh raycast
+      if (!state.features.includes('mesh-detection')) problems.push('mesh-detection not granted');
+      if (state.meshes < 1) problems.push('no meshes tracked');
+      if (header !== 'on top') problems.push(`overlay header ${header}`);
+      return `meshes=${state.meshes}, header ${header}`;
+    },
+  },
   'proposals/plane-detection': {
     // domOverlay root = body with a beforexrselect-cancelling header (G6); select anchors on a plane
     async run(page, problems) {

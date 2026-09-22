@@ -13,6 +13,8 @@ import type { NativeAnchorData } from './anchors.js';
 import {
   isMode,
   isTopFrame,
+  parseCapabilities,
+  type Capabilities,
   parseDeviceInfo,
   scaleRect,
   type DeviceInfo,
@@ -27,6 +29,7 @@ import {
 } from './bridge-types.js';
 import { nativeFramebufferSize, devicePixelRatioOrOne } from './device.js';
 import type { NativeHandData } from './hand-input.js';
+import type { NativeMeshUpdate } from './meshes.js';
 import type { NativePlaneData, PlaneEnvironment } from './hittest.js';
 import { PosePredictor } from './prediction.js';
 import type { NativeEnvironment } from './reflection.js';
@@ -56,6 +59,12 @@ export class HoloWebBridge {
   environmentHandler: ((environment: NativeEnvironment) => void) | null = null;
   /** Receives onVisibility states (visibility.ts). */
   visibilityHandler: ((state: string) => void) | null = null;
+  /** Receives onMeshes updates (MeshTracking). */
+  meshesHandler: ((update: NativeMeshUpdate) => void) | null = null;
+  /** Capabilities from the ready reply (undefined: native did not report them). */
+  capabilities: Capabilities | undefined;
+  /** Called when the ready reply reports capabilities (supported features follow them). */
+  onCapabilities: ((capabilities: Capabilities) => void) | null = null;
   /** Stereo-only viewer pose prediction; horizonMs 0 disables it. */
   readonly predictor = new PosePredictor();
   /** Orientation / framebuffer size changes seen between frames (presentation rescales). */
@@ -87,6 +96,7 @@ export class HoloWebBridge {
       onHands: (hands) => this.handsHandler?.(Array.isArray(hands) ? hands : []),
       onEnvironment: (environment) => this.environmentHandler?.(environment),
       onVisibility: (state) => this.visibilityHandler?.(state),
+      onMeshes: (update) => this.meshesHandler?.(update),
       onSessionEnded: (reason) => this.onNativeSessionEnded?.(reason),
     };
   }
@@ -116,6 +126,11 @@ export class HoloWebBridge {
     });
     if (!isRecord(reply)) return;
     this.deviceInfo = parseDeviceInfo(reply.device) ?? this.deviceInfo;
+    const capabilities = parseCapabilities(reply.capabilities);
+    if (capabilities) {
+      this.capabilities = capabilities;
+      this.onCapabilities?.(capabilities);
+    }
     if (isMode(reply.mode)) this.setLocalMode(reply.mode);
   }
 

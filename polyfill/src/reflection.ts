@@ -14,6 +14,7 @@
  */
 import { P_SESSION, XRSession } from 'iwer';
 import { XRWebGLBinding as IWERWebGLBinding } from 'iwer/lib/depth/XRWebGLBinding.js';
+import { decodeBase64 } from './base64.js';
 import { liveProbes, setProbeCreatedHook, XRLightProbe } from './light.js';
 
 export interface NativeEnvironment {
@@ -26,13 +27,6 @@ export interface NativeEnvironment {
 }
 
 type GL = WebGLRenderingContext | WebGL2RenderingContext;
-
-function decodeBase64(s: string): Uint8Array {
-  const bin = atob(s);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
 
 /** Latest environment map plus diagnostics. */
 export class ReflectionMaps {

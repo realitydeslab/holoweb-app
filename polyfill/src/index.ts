@@ -3,9 +3,10 @@
  * (main frame, page world). Installs navigator.xr backed by a HoloKit IWER device and
  * exposes window.__holoweb for native's evaluateJavaScript fallback.
  */
+import { P_DEVICE } from 'iwer';
 import { NativeAnchors } from './anchors.js';
 import { HoloWebBridge, type NativeCallbacks } from './bridge.js';
-import { createHoloKitDevice } from './device.js';
+import { createHoloKitDevice, featuresFor } from './device.js';
 import { HandTracking } from './hand-input.js';
 import { installGPUBinding, needsPrimingView } from './gpu-binding.js';
 import { PlaneEnvironment } from './hittest.js';
@@ -13,6 +14,7 @@ import { installTransientHitTest } from './hittest-transient.js';
 import { ScreenInput } from './input.js';
 import { createMockTransport } from './mock-native.js';
 import { installLightEstimation } from './light.js';
+import { MeshTracking } from './meshes.js';
 import { PlaneTracking } from './planes.js';
 import { installReflectionBinding, ReflectionMaps } from './reflection.js';
 import { installFrameHooks, installSessionHooks } from './session.js';
@@ -34,6 +36,7 @@ export interface HoloWebGlobal extends NativeCallbacks {
   readonly anchors: NativeAnchors;
   readonly hands: HandTracking;
   readonly planes: PlaneTracking;
+  readonly meshes: MeshTracking;
   readonly reflections: ReflectionMaps;
 }
 
@@ -64,6 +67,11 @@ export function install(): HoloWebGlobal {
   bridge.handsHandler = (list) => hands.update(list);
   const planes = new PlaneTracking(device);
   bridge.planeListeners.add((list) => planes.update(list));
+  const meshes = new MeshTracking(device);
+  bridge.meshesHandler = (update) => meshes.update(update);
+  bridge.onCapabilities = (capabilities) => {
+    device[P_DEVICE].supportedFeatures = featuresFor(capabilities);
+  };
   const reflections = new ReflectionMaps();
   bridge.environmentHandler = (env) => reflections.update(env);
   bridge.visibilityHandler = (state) => applyVisibility(device, state);
@@ -71,6 +79,7 @@ export function install(): HoloWebGlobal {
     anchors.clear();
     hands.reset();
     planes.clear();
+    meshes.clear();
     reflections.clear();
   });
   installFrameHooks(device, bridge);
@@ -92,6 +101,7 @@ export function install(): HoloWebGlobal {
     anchors,
     hands,
     planes,
+    meshes,
     reflections,
   };
   Object.defineProperty(globalThis, '__holoweb', { value: api, configurable: true, writable: false });

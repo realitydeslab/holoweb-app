@@ -20,13 +20,23 @@ export const HOLOKIT_FEATURES: WebXRFeature[] = [
   'plane-detection',
 ];
 
+/**
+ * Supported features for the reported capabilities (G13): 'mesh-detection' needs LiDAR scene
+ * reconstruction, and 'hand-tracking' needs scene depth. Without a report, the defaults stay.
+ */
+export function featuresFor(capabilities: { sceneReconstruction: boolean; sceneDepth: boolean }): WebXRFeature[] {
+  const features = HOLOKIT_FEATURES.filter((f) => f !== 'hand-tracking' || capabilities.sceneDepth);
+  if (capabilities.sceneReconstruction) features.push('mesh-detection');
+  return features;
+}
+
 export function createHoloKitDeviceConfig(userAgent: string): XRDeviceConfig {
   return {
     name: 'HoloKit',
     controllerConfig: undefined,
     // immersive-vr: opaque rendering, native draws black instead of the camera (product decision).
     supportedSessionModes: ['inline', 'immersive-ar', 'immersive-vr'],
-    supportedFeatures: HOLOKIT_FEATURES,
+    supportedFeatures: [...HOLOKIT_FEATURES],
     supportedFrameRates: [60],
     isSystemKeyboardSupported: false,
     internalNominalFrameRate: 60,

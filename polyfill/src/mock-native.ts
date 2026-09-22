@@ -8,7 +8,7 @@
  */
 import { mat4 } from 'gl-matrix';
 import type { NativeCallbacks, RenderMode } from './bridge.js';
-import { mockEnvironment, mockPlanes } from './mock-environment.js';
+import { mockEnvironment, mockMeshes, mockPlanes } from './mock-environment.js';
 import { mockHand } from './mock-hands.js';
 import type { Transport } from './webkit.js';
 
@@ -96,10 +96,17 @@ export function createMockTransport(options: MockOptions = {}): Transport {
         dpi: 460,
       },
       mode,
+      // like an iPhone Pro: LiDAR scene reconstruction and depth
+      capabilities: { sceneReconstruction: true, sceneDepth: true },
     }),
     requestSession: (msg) => {
       stop();
-      handsOn = Array.isArray(msg.features) && msg.features.includes('hand-tracking');
+      const features = Array.isArray(msg.features) ? (msg.features as string[]) : [];
+      handsOn = features.includes('hand-tracking');
+      if (features.includes('mesh-detection')) {
+        setTimeout(() => target()?.onMeshes(mockMeshes(false, 0) as never), 100);
+        setTimeout(() => timer !== null && target()?.onMeshes(mockMeshes(true, performance.now()) as never), 1500);
+      }
       pushFrame();
       timer = setInterval(pushFrame, FRAME_MS);
       const t0 = performance.now();
