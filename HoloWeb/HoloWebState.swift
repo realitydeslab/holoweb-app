@@ -6,8 +6,8 @@ import Observation
 import SwiftUI
 import WebKit
 
-/// What the screen is doing. Browsing is an ordinary web page; the two AR states exist only
-/// while the page holds an immersive-ar session.
+/// What the screen is doing. Browsing is an ordinary web page; the other states exist only
+/// while the page holds an immersive session.
 enum ViewerPhase: Equatable {
     /// Normal website on an opaque background, camera off.
     case browsing
@@ -15,6 +15,15 @@ enum ViewerPhase: Equatable {
     case arMono
     /// HoloKit stereo via the top-right toggle: black background, two eye views, landscape lock.
     case arStereo
+    /// immersive-vr: ARKit still tracks 6DoF, but the camera image is never drawn (black).
+    case vrMono
+    /// immersive-vr in HoloKit stereo.
+    case vrStereo
+
+    /// The camera image is drawn behind the page.
+    var blendsCamera: Bool { self == .arMono }
+    var isImmersive: Bool { self != .browsing }
+    var isVR: Bool { self == .vrMono || self == .vrStereo }
 }
 
 /// How the web content is presented on the phone screen.
@@ -36,11 +45,14 @@ final class HoloWebState: NSObject {
     private(set) var url: URL?
     private(set) var mode: RenderMode = .mono
     private(set) var isARRunning = false
-    /// True while the page holds an immersive-ar session (between requestSession and its end).
+    /// True while the page holds an immersive session (between requestSession and its end).
     private(set) var isInXRSession = false
+    /// The current session is immersive-vr (opaque) rather than immersive-ar.
+    private(set) var isVRSession = false
 
     var phase: ViewerPhase {
         guard isInXRSession else { return .browsing }
+        if isVRSession { return mode == .stereo ? .vrStereo : .vrMono }
         return mode == .stereo ? .arStereo : .arMono
     }
 
@@ -107,11 +119,13 @@ final class HoloWebState: NSObject {
         }
     }
 
-    /// Page started an immersive-ar session ("Start AR"). The mode stays whatever it is
+    /// Page started an immersive session ("Start AR"/"Enter VR"). The mode stays whatever it is
     /// (mono unless a test page asked for stereo before starting).
-    func xrSessionStarted(features: Set<String> = []) {
+    func xrSessionStarted(features: Set<String> = [], vr: Bool = false,
+                          detectionImages: Set<ARReferenceImage> = []) {
         isInXRSession = true
-        startARSession(features: features)
+        isVRSession = vr
+        startARSession(features: features, detectionImages: detectionImages)
         print("[state] phase -> \(phase)")
         #if DEBUG
         startDebugToggle()
@@ -122,6 +136,7 @@ final class HoloWebState: NSObject {
     /// back to browsing, camera off, mono, orientation unlocked.
     func xrSessionEnded() {
         isInXRSession = false
+        isVRSession = false
         pauseARSession()
         if mode != .mono { setMode(.mono) }
         print("[state] phase -> \(phase)")
@@ -221,8 +236,10 @@ final class HoloWebState: NSObject {
 
     /// Runs world tracking. Costly extras are enabled only for the WebXR features that need them:
     /// "hand-tracking" adds LiDAR depth (joint depth), "mesh-detection" adds scene reconstruction.
-    func startARSession(features: Set<String> = []) {
-        guard !isARRunning else { return }
+    /// `detectionImages` (image-tracking) re-runs an already running session with them, keeping
+    /// its anchors (no reset options).
+    func startARSession(features: Set<String> = [], detectionImages: Set<ARReferenceImage> = []) {
+        guard !isARRunning || !detectionImages.isEmpty else { return }
         let configuration = ARWorldTrackingConfiguration()
         configuration.planeDetection = [.horizontal, .vertical]
         configuration.environmentTexturing = .automatic
@@ -235,6 +252,12 @@ final class HoloWebState: NSObject {
             } else if ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
                 configuration.sceneReconstruction = .mesh
             }
+        }
+        if !detectionImages.isEmpty {
+            configuration.detectionImages = detectionImages
+            configuration.maximumNumberOfTrackedImages = min(detectionImages.count, ImageTracker.maxTracked)
+            configuration.automaticImageScaleEstimationEnabled = true
+            print("[bridge] image tracking n=\(detectionImages.count)")
         }
         print("[state] ARKit run frameSemantics=\(configuration.frameSemantics.rawValue) sceneReconstruction=\(configuration.sceneReconstruction.rawValue)")
         session.run(configuration)

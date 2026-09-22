@@ -8,6 +8,7 @@ import SwiftUI
 /// - browsing: the website on an opaque system background; only reload is offered.
 /// - arMono: after the page's "Start AR", the camera shows through the transparent page.
 /// - arStereo: via the top-right toggle; black background for HoloKit's optical see-through.
+/// - vrMono / vrStereo: immersive-vr; always black, ARKit only provides tracking.
 struct ContentView: View {
     @Environment(HoloWebState.self) private var state
 
@@ -26,8 +27,8 @@ struct ContentView: View {
         switch state.phase {
         case .browsing:
             Color(.systemBackground)
-        case .arMono, .arStereo:
-            // The renderer draws the camera in mono and leaves the screen black in stereo.
+        case .arMono, .arStereo, .vrMono, .vrStereo:
+            // The renderer draws the camera in AR mono and leaves the screen black otherwise.
             Color.black
             MetalViewRepresentable()
         }
@@ -48,7 +49,7 @@ struct ContentView: View {
                     Button {
                         state.exitXR()
                     } label: {
-                        Label("Exit AR", systemImage: "xmark")
+                        Label(state.phase.isVR ? "Exit VR" : "Exit AR", systemImage: "xmark")
                     }
                 }
                 Button {

@@ -56,6 +56,10 @@ final class ARBridge: NSObject {
     /// The page asked for "mesh-detection".
     var meshesRequested = false
     let meshStreamer = MeshStreamer()
+    /// The page asked for "image-tracking"; images come from its `setTrackedImages`.
+    var imagesRequested = false
+    let imageTracker = ImageTracker()
+    var lastImagesLog: TimeInterval = 0
     /// Last `onVisibility` state sent this session.
     var visibility = "visible"
     /// Anchors the page created, by identifier. Held directly so removal never depends on
@@ -117,6 +121,8 @@ final class ARBridge: NSObject {
     func resetPageState() {
         pageGeneration += 1
         stopStreaming()
+        imageTracker.clear()
+        imagesRequested = false
         frames.removeAll()
         activeFrameKey = nil
         pageReady = false
@@ -160,6 +166,7 @@ extension ARBridge: WKScriptMessageHandlerWithReply {
             print("[bridge] ready \(key)\(message.frameInfo.isMainFrame ? "" : " (iframe)"), transport: \(handle != nil ? "WKJSHandle" : "window.__holoweb")")
             replyHandler(["ok": true, "device": DeviceInfo.current.dictionary,
                           "mode": state?.mode.rawValue ?? "mono",
+                          "capabilities": Self.capabilities,
                           "transport": handle != nil ? "jshandle" : "global"], nil)
         case "requestSession":
             guard let state else { return replyHandler(nil, "app state unavailable") }
@@ -167,7 +174,9 @@ extension ARBridge: WKScriptMessageHandlerWithReply {
             if frames[key] != nil { activeFrameKey = key }
             let features = body["features"] as? [String] ?? []
             print("[bridge] requestSession features=\(features.joined(separator: ","))")
-            state.xrSessionStarted(features: Set(features))
+            imagesRequested = features.contains("image-tracking")
+            state.xrSessionStarted(features: Set(features), vr: body["mode"] as? String == "immersive-vr",
+                                   detectionImages: imagesRequested ? imageTracker.detectionImages : [])
             streaming = true
             planesDirty = true
             anchorsDirty = true
@@ -183,6 +192,8 @@ extension ARBridge: WKScriptMessageHandlerWithReply {
             stopStreaming()
             state?.xrSessionEnded()
             replyHandler(["ok": true], nil)
+        case "setTrackedImages":
+            setTrackedImages(body, replyHandler: replyHandler)
         case "hitTest":
             replyHandler(["hits": hitTest(body)], nil)
         case "setMode":

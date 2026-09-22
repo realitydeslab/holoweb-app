@@ -205,7 +205,8 @@ def third_party_run(report: Report, device: str, url: str, label: str, seconds: 
     clicked = re.search(r"\[test\] (clicked|no element) (.*)", log)
     report.add(f"{name}.clicked", bool(clicked) and clicked.group(1) == "clicked",
                clicked.group(0) if clicked else "no [test] line (page never finished loading?)")
-    report.add(f"{name}.entered-ar", "phase -> arMono" in log)
+    entered = re.search(r"phase -> (arMono|vrMono)", log)
+    report.add(f"{name}.entered-ar", bool(entered), entered.group(1) if entered else "")
     stats = [(int(p), int(s)) for p, s in re.findall(r"\[bridge\] ARKit .* pushed (\d+), skipped (\d+)", log)]
     if stats:
         pushed, skipped = stats[-1]
@@ -236,8 +237,9 @@ def hands_run(report: Report, device: str, seconds: int = 22) -> None:
     log = launch(device, {"HOLOWEB_PAGE": "hands-check.html"}, seconds)
     seen = {m.group(2): (m.group(1) == "PASS", m.group(3).strip())
             for m in re.finditer(r"\[check\] (PASS|FAIL) (\S+) ?([^\n]*)", log)}
-    ok, detail = seen.get("hands.tracker-rate", (False, "no result"))
-    report.add("device.hands.tracker-rate", ok, detail)
+    for name in ["hands.tracker-rate", "hands.timestamp"]:
+        ok, detail = seen.get(name, (False, "no result"))
+        report.add(f"device.{name}", ok, detail)
     line = re.findall(r"\[bridge\] hands sent ([^\n]*)", log)
     report.add("device.hands.log-line", bool(line), line[-1] if line else "no [bridge] hands sent line")
     failures = re.findall(r"\[bridge\] (?:call failed onHands|hand pose request failed)[^\n]*", log)

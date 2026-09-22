@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2026 Reality Design Lab <dev@reality.design>
 // SPDX-License-Identifier: MIT
 
+import ARKit
 import UIKit
 import WebKit
 
@@ -82,5 +83,17 @@ extension ARBridge {
         visibility = state
         print("[bridge] visibility \(state)")
         call("onVisibility(state)", ["state": state])
+    }
+}
+
+// MARK: - Capabilities
+
+extension ARBridge {
+    /// Reported in the `ready` reply so the polyfill advertises only what this phone can do
+    /// (e.g. mesh-detection on LiDAR phones only).
+    static var capabilities: [String: Bool] {
+        ["lidar": ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth),
+         "sceneReconstruction": ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh),
+         "handTracking": true]
     }
 }

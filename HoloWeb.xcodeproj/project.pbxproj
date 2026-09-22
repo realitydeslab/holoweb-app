@@ -15,6 +15,8 @@
 		96B000000000000000000143 /* HandTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96B000000000000000000141 /* HandTracker.swift */; };
 		96B000000000000000000152 /* MeshStreamer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96B000000000000000000151 /* MeshStreamer.swift */; };
 		96B000000000000000000153 /* MeshStreamer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96B000000000000000000151 /* MeshStreamer.swift */; };
+		96B000000000000000000162 /* ImageTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96B000000000000000000161 /* ImageTracker.swift */; };
+		96B000000000000000000163 /* ImageTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96B000000000000000000161 /* ImageTracker.swift */; };
 		96B000000000000000000122 /* EnvironmentProbeReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96B000000000000000000121 /* EnvironmentProbeReader.swift */; };
 		96B000000000000000000123 /* EnvironmentProbeReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96B000000000000000000121 /* EnvironmentProbeReader.swift */; };
 		96B0000000000000000000F2 /* BundledPageSchemeHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96B0000000000000000000F1 /* BundledPageSchemeHandler.swift */; };
@@ -78,6 +80,7 @@
 		96B000000000000000000131 /* BridgeFrames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeFrames.swift; sourceTree = "<group>"; };
 		96B000000000000000000141 /* HandTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HandTracker.swift; sourceTree = "<group>"; };
 		96B000000000000000000151 /* MeshStreamer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshStreamer.swift; sourceTree = "<group>"; };
+		96B000000000000000000161 /* ImageTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageTracker.swift; sourceTree = "<group>"; };
 		96B000000000000000000121 /* EnvironmentProbeReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvironmentProbeReader.swift; sourceTree = "<group>"; };
 		96B000000000000000000101 /* ARBridge+Frames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ARBridge+Frames.swift"; sourceTree = "<group>"; };
 		96B0000000000000000000F1 /* BundledPageSchemeHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BundledPageSchemeHandler.swift; sourceTree = "<group>"; };
@@ -153,6 +156,7 @@
 				4B1E355D2A7A21A9003EBC46 /* HoloWebState.swift */,
 				96B000000000000000000101 /* ARBridge+Frames.swift */,
 				96B000000000000000000121 /* EnvironmentProbeReader.swift */,
+				96B000000000000000000161 /* ImageTracker.swift */,
 				96B000000000000000000151 /* MeshStreamer.swift */,
 				96B000000000000000000141 /* HandTracker.swift */,
 				96B000000000000000000131 /* BridgeFrames.swift */,
@@ -295,6 +299,7 @@
 				4B1E355E2A7A21A9003EBC46 /* HoloWebState.swift in Sources */,
 				96B000000000000000000102 /* ARBridge+Frames.swift in Sources */,
 				96B000000000000000000122 /* EnvironmentProbeReader.swift in Sources */,
+				96B000000000000000000162 /* ImageTracker.swift in Sources */,
 				96B000000000000000000152 /* MeshStreamer.swift in Sources */,
 				96B000000000000000000142 /* HandTracker.swift in Sources */,
 				96B000000000000000000132 /* BridgeFrames.swift in Sources */,
@@ -318,6 +323,7 @@
 				966427E42E033F9300B9EEA8 /* HoloWebState.swift in Sources */,
 				96B000000000000000000103 /* ARBridge+Frames.swift in Sources */,
 				96B000000000000000000123 /* EnvironmentProbeReader.swift in Sources */,
+				96B000000000000000000163 /* ImageTracker.swift in Sources */,
 				96B000000000000000000153 /* MeshStreamer.swift in Sources */,
 				96B000000000000000000143 /* HandTracker.swift in Sources */,
 				96B000000000000000000133 /* BridgeFrames.swift in Sources */,

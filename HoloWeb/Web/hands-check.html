@@ -19,7 +19,7 @@ let camera = null;
 const bridge = {
   onFrame(t, mode, transform) { camera = transform; },
   onPlanes() {}, onAnchors() {}, onEnvironment() {}, onVisibility() {},
-  onHands(hands) { calls.push({ at: performance.now(), hands, camera: camera && camera.slice(12, 15) }); },
+  onHands(update) { calls.push({ at: performance.now(), t: update.t, hands: update.hands, camera: camera && camera.slice(12, 15) }); },
   onSessionEnded(reason) { log("sessionEnded", reason); },
 };
 window.__holoweb = bridge;
@@ -37,6 +37,8 @@ const dist = (j, a, b) => Math.hypot(j[3 * a] - j[3 * b], j[3 * a + 1] - j[3 * b
   const rate = window_.length / seconds;
   log("onHands calls/sec:", rate.toFixed(1), "over", seconds.toFixed(1), "s");
   check("hands.tracker-rate", rate >= 15, rate.toFixed(1) + "/s (>=15)");
+  const ts = window_.map(c => c.t);
+  check("hands.timestamp", ts.length > 0 && ts.every((t, i) => typeof t === "number" && t > 0 && (i === 0 || t > ts[i - 1])), ts.length ? "t increasing" : "no calls");
 
   const withHands = window_.filter(c => c.hands.length > 0);
   check("hands.in-view", withHands.length > 0, withHands.length ? `${withHands.length} results with hands` : "no hand seen: hold a hand in front of the rear camera");
@@ -45,7 +47,9 @@ const dist = (j, a, b) => Math.hypot(j[3 * a] - j[3 * b], j[3 * a + 1] - j[3 * b
   } else {
     const all = withHands.flatMap(c => c.hands);
     const bad = all.filter(h => !(h.handedness === "left" || h.handedness === "right") || h.joints?.length !== 63 ||
-      !h.joints.every(Number.isFinite) || h.confidence?.length !== 21);
+      !h.joints.every(Number.isFinite) || h.confidence?.length !== 21 || !Number.isInteger(h.depthValid));
+    const measured = all.map(h => h.depthValid.toString(2).split("").filter(c => c === "1").length);
+    log("joints with measured depth per hand (of 21): median", measured.sort((a, b) => a - b)[measured.length >> 1]);
     check("hands.shape", !bad.length, bad.length ? `${bad.length}/${all.length} malformed` : `${all.length} hands, 63 finite numbers each`);
     const span = (withHands[withHands.length - 1].at - withHands[0].at) / 1000;
     const handRate = span > 0 ? (withHands.length - 1) / span : 0;

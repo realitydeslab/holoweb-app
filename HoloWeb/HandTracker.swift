@@ -5,41 +5,54 @@ import ARKit
 import UIKit
 import Vision
 
-/// 3D hand joints for `bridge.onHands` (see plan/bridge_protocol.md).
+/// 3D hand joints for `bridge.onHands` (plan/bridge_protocol.md, plan/samples_requirements.md G10).
 ///
-/// Vision finds 2D joints in `ARFrame.capturedImage` on a background queue; each joint is lifted
-/// to 3D with the LiDAR depth map and the camera intrinsics, then moved to world space with the
-/// raw `ARCamera.transform` (sensor orientation, the same as capturedImage). Only the pixel
-/// buffers and camera values of one frame are held, never the ARFrame, and frames arriving while
-/// Vision is busy are dropped.
+/// Vision finds 21 2D joints per hand in `ARFrame.capturedImage` (orientation `.up`: the buffer is
+/// in sensor orientation, the same frame as the intrinsics) on a serial background queue. Each
+/// joint is lifted to 3D with the LiDAR depth map: a 3x3 median of medium/high-confidence pixels,
+/// clamped to the palm depth +- 8 cm, since thin fingers often sample the background at their
+/// silhouette. Joints are unprojected with the intrinsics and moved to world space with the raw
+/// `ARCamera.transform`. Only one frame's pixel buffers are held, never the ARFrame; frames
+/// arriving while Vision is busy are dropped. Runs at 30 Hz, 15 Hz when the device is hot.
 @MainActor
 final class HandTracker {
     struct Hand: Sendable {
         let handedness: String
         let joints: [Double]
         let confidence: [Double]
+        /// Bit i set: joint i has measured depth (not inferred from the palm).
+        let depthValid: Int
     }
 
     struct Result: Sendable {
+        /// ARFrame timestamp (ms) of the image the hands were found in.
+        let t: Double
         let hands: [Hand]
         let visionMs: Double
     }
 
     private(set) var busy = false
+    private var lastSubmit: TimeInterval = 0
     private let queue = DispatchQueue(label: "holoweb.hands", qos: .userInitiated)
+    /// Per-hand depth offsets from the palm, touched only on `queue`.
+    private let memory = DepthMemory()
 
-    /// Starts tracking `frame` unless a frame is in progress; `completion` runs on the main actor.
-    func submit(_ frame: ARFrame, interfaceOrientation: UIInterfaceOrientation,
-                completion: @escaping @MainActor @Sendable (Result) -> Void) {
-        guard !busy else { return }
+    /// Starts tracking `frame` if due and idle; `completion` runs on the main actor.
+    func submit(_ frame: ARFrame, completion: @escaping @MainActor @Sendable (Result) -> Void) {
+        let thermal = ProcessInfo.processInfo.thermalState
+        guard !busy, thermal != .critical else { return }
+        let interval = thermal == .serious ? 1.0 / 15 : 1.0 / 30
+        // Small margin so 60 Hz frames (16.7 ms apart) land on every other one.
+        guard frame.timestamp - lastSubmit >= interval - 0.004 else { return }
+        lastSubmit = frame.timestamp
         busy = true
         let depth = frame.smoothedSceneDepth ?? frame.sceneDepth
         let input = Input(image: frame.capturedImage, depth: depth?.depthMap, confidence: depth?.confidenceMap,
                           intrinsics: frame.camera.intrinsics, resolution: frame.camera.imageResolution,
-                          cameraTransform: frame.camera.transform,
-                          orientation: Self.visionOrientation(interfaceOrientation))
+                          cameraTransform: frame.camera.transform, t: frame.timestamp * 1000)
+        let memory = self.memory
         queue.async {
-            let result = Self.track(input)
+            let result = Self.track(input, memory: memory)
             Task { @MainActor in
                 self.busy = false
                 completion(result)
@@ -57,7 +70,7 @@ final class HandTracker {
         let intrinsics: simd_float3x3
         let resolution: CGSize
         let cameraTransform: simd_float4x4
-        let orientation: CGImagePropertyOrientation
+        let t: Double
     }
 
     /// Vision order: wrist; thumb CMC, MP, IP, tip; index/middle/ring/little MCP, PIP, DIP, tip.
@@ -66,84 +79,87 @@ final class HandTracker {
         .indexMCP, .indexPIP, .indexDIP, .indexTip, .middleMCP, .middlePIP, .middleDIP, .middleTip,
         .ringMCP, .ringPIP, .ringDIP, .ringTip, .littleMCP, .littlePIP, .littleDIP, .littleTip,
     ]
-    /// Used when the device has no depth (no LiDAR) or no joint has a valid depth sample.
+    /// Wrist, thumb CMC and the four finger MCPs: large, flat, almost always valid depth.
+    private nonisolated static let palmJoints = [0, 1, 5, 9, 13, 17]
+    private nonisolated static let palmWindow: Float = 0.08
+    /// Used when the device has no depth (no LiDAR) or the palm has no valid depth sample.
     private nonisolated static let fallbackDepth: Float = 0.45
 
-    private nonisolated static func track(_ input: Input) -> Result {
+    private nonisolated static func track(_ input: Input, memory: DepthMemory) -> Result {
         let start = CACurrentMediaTime()
         let request = VNDetectHumanHandPoseRequest()
         request.maximumHandCount = 2
-        let handler = VNImageRequestHandler(cvPixelBuffer: input.image, orientation: input.orientation)
+        let handler = VNImageRequestHandler(cvPixelBuffer: input.image, orientation: .up)
         do {
             try handler.perform([request])
         } catch {
             print("[bridge] hand pose request failed: \(error.localizedDescription)")
         }
-        let observations = request.results ?? []
         let visionMs = (CACurrentMediaTime() - start) * 1000
         let depth = DepthSampler(depth: input.depth, confidence: input.confidence)
-        let hands = observations.compactMap { hand(from: $0, input: input, depth: depth) }
-        return Result(hands: hands, visionMs: visionMs)
+        let hands = (request.results ?? []).compactMap { hand(from: $0, input: input, depth: depth, memory: memory) }
+        memory.forget(except: Set(hands.map(\.handedness)))
+        return Result(t: input.t, hands: hands, visionMs: visionMs)
     }
 
     private nonisolated static func hand(from observation: VNHumanHandPoseObservation, input: Input,
-                                         depth: DepthSampler?) -> Hand? {
+                                         depth: DepthSampler?, memory: DepthMemory) -> Hand? {
+        // The rear camera does not mirror, so Vision's label is the user's hand (verify on device).
+        let handedness: String
+        switch observation.chirality {
+        case .left: handedness = "left"
+        case .right: handedness = "right"
+        default: return nil
+        }
         guard let points = try? observation.recognizedPoints(.all) else { return nil }
-        // Raw capturedImage coordinates, normalised, origin top-left.
-        let image: [simd_float2] = jointNames.map { name in
+        // Normalised, origin bottom-left -> normalised, origin top-left (same as the pixel buffer).
+        let image = jointNames.map { name -> simd_float2 in
             guard let p = points[name] else { return simd_float2(0.5, 0.5) }
-            return rawNormalized(p.location, orientation: input.orientation)
+            return simd_float2(Float(p.location.x), 1 - Float(p.location.y))
         }
         let confidence = jointNames.map { Double(points[$0]?.confidence ?? 0) }
-        let sampled = image.enumerated().map { i, p in confidence[i] > 0 ? depth?.depth(at: p) : nil }
-        let valid = sampled.compactMap { $0 }.sorted()
-        let median = valid.isEmpty ? fallbackDepth : valid[valid.count / 2]
+        let sampled = image.enumerated().map { i, p in confidence[i] > 0 ? depth?.median3x3(at: p) : nil }
+        let palmSamples = palmJoints.compactMap { sampled[$0] }.sorted()
+        let palm = palmSamples.isEmpty ? fallbackDepth : palmSamples[palmSamples.count / 2]
+        var offsets = memory.offsets(handedness)
+        var depthValid = 0
+        let depths = sampled.enumerated().map { i, d -> Float in
+            if let d, abs(d - palm) <= palmWindow {
+                depthValid |= 1 << i
+                offsets[i] = d - palm
+                return d
+            }
+            return palm + offsets[i]
+        }
+        memory.store(offsets, for: handedness)
         let K = input.intrinsics
         let fx = K.columns.0.x, fy = K.columns.1.y, cx = K.columns.2.x, cy = K.columns.2.y
         let w = Float(input.resolution.width), h = Float(input.resolution.height)
         var joints: [Double] = []
         joints.reserveCapacity(63)
         for (i, p) in image.enumerated() {
-            let d = sampled[i] ?? median
-            let u = p.x * w, v = p.y * h
-            let camera = simd_float4((u - cx) / fx * d, -(v - cy) / fy * d, -d, 1)
-            let world = input.cameraTransform * camera
+            let d = depths[i], u = p.x * w, v = p.y * h
+            let world = input.cameraTransform * simd_float4((u - cx) / fx * d, -(v - cy) / fy * d, -d, 1)
             joints += [Double(world.x), Double(world.y), Double(world.z)]
         }
         guard joints.allSatisfy(\.isFinite) else { return nil }
-        // Vision labels chirality from the upright image. The rear camera does not mirror, so the
-        // label is used as is (verify on device: raise the right hand, expect "right").
-        let handedness = observation.chirality == .left ? "left" : "right"
-        return Hand(handedness: handedness, joints: joints, confidence: confidence)
-    }
-
-    /// capturedImage is in the sensor's landscape-right orientation; Vision gets the EXIF
-    /// orientation that makes the hand upright for the current interface orientation.
-    nonisolated static func visionOrientation(_ orientation: UIInterfaceOrientation) -> CGImagePropertyOrientation {
-        switch orientation {
-        case .landscapeRight: .up
-        case .landscapeLeft: .down
-        case .portraitUpsideDown: .left
-        default: .right
-        }
-    }
-
-    /// Vision point (normalised, origin bottom-left, in the upright image) -> raw capturedImage
-    /// point (normalised, origin top-left).
-    nonisolated static func rawNormalized(_ p: CGPoint, orientation: CGImagePropertyOrientation) -> simd_float2 {
-        let x = Float(p.x), y = Float(p.y)
-        switch orientation {
-        case .right: return simd_float2(1 - y, 1 - x)  // raw column 0 is the top row, raw row 0 the right column
-        case .down: return simd_float2(1 - x, y)
-        case .left: return simd_float2(y, x)
-        default: return simd_float2(x, 1 - y)
-        }
+        return Hand(handedness: handedness, joints: joints, confidence: confidence, depthValid: depthValid)
     }
 }
 
-/// Nearest-pixel reads from the depth map (Float32 metres) gated by its confidence map (UInt8
+/// Last depth offset from the palm per joint and hand, for joints whose depth is missing or
+/// implausible in the current frame. Used only on the tracker's serial queue.
+private final class DepthMemory: @unchecked Sendable {
+    private var byHand: [String: [Float]] = [:]
+
+    func offsets(_ hand: String) -> [Float] { byHand[hand] ?? [Float](repeating: 0, count: 21) }
+    func store(_ offsets: [Float], for hand: String) { byHand[hand] = offsets }
+    func forget(except seen: Set<String>) { byHand = byHand.filter { seen.contains($0.key) } }
+}
+
+/// Reads from the depth map (Float32 metres) gated by its confidence map (UInt8
 /// ARConfidenceLevel). Both have the same size, and the capturedImage's orientation and aspect at
-/// lower resolution.
+/// lower resolution (256x192 for 1920x1440).
 private struct DepthSampler {
     private let depth: CVPixelBuffer
     private let confidence: CVPixelBuffer?
@@ -154,23 +170,33 @@ private struct DepthSampler {
         self.confidence = confidence
     }
 
-    /// Depth at a normalised top-left point, or nil if low confidence or invalid.
-    func depth(at p: simd_float2) -> Float? {
+    /// Median of the 3x3 neighbourhood's medium/high-confidence depths at a normalised top-left
+    /// point, or nil if none is valid.
+    func median3x3(at p: simd_float2) -> Float? {
         let w = CVPixelBufferGetWidth(depth), h = CVPixelBufferGetHeight(depth)
-        let x = min(max(Int(p.x * Float(w)), 0), w - 1), y = min(max(Int(p.y * Float(h)), 0), h - 1)
-        if let confidence {
-            CVPixelBufferLockBaseAddress(confidence, .readOnly)
-            defer { CVPixelBufferUnlockBaseAddress(confidence, .readOnly) }
-            guard let base = CVPixelBufferGetBaseAddress(confidence) else { return nil }
-            let row = CVPixelBufferGetBytesPerRow(confidence)
-            let level = base.load(fromByteOffset: y * row + x, as: UInt8.self)
-            guard level >= UInt8(ARConfidenceLevel.medium.rawValue) else { return nil }
-        }
+        let cx = Int(p.x * Float(w)), cy = Int(p.y * Float(h))
         CVPixelBufferLockBaseAddress(depth, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(depth, .readOnly) }
+        if let confidence { CVPixelBufferLockBaseAddress(confidence, .readOnly) }
+        defer { if let confidence { CVPixelBufferUnlockBaseAddress(confidence, .readOnly) } }
         guard let base = CVPixelBufferGetBaseAddress(depth) else { return nil }
-        let d = base.load(fromByteOffset: y * CVPixelBufferGetBytesPerRow(depth) + x * 4, as: Float32.self)
-        return d.isFinite && d > 0.05 ? d : nil
+        let row = CVPixelBufferGetBytesPerRow(depth)
+        let confidenceBase = confidence.flatMap(CVPixelBufferGetBaseAddress)
+        let confidenceRow = confidence.map(CVPixelBufferGetBytesPerRow) ?? 0
+        let minimum = UInt8(ARConfidenceLevel.medium.rawValue)
+        var values: [Float] = []
+        for y in max(cy - 1, 0)...min(cy + 1, h - 1) {
+            for x in max(cx - 1, 0)...min(cx + 1, w - 1) {
+                if let confidenceBase, confidenceBase.load(fromByteOffset: y * confidenceRow + x, as: UInt8.self) < minimum {
+                    continue
+                }
+                let d = base.load(fromByteOffset: y * row + x * 4, as: Float32.self)
+                if d.isFinite, d > 0.05 { values.append(d) }
+            }
+        }
+        guard !values.isEmpty else { return nil }
+        values.sort()
+        return values[values.count / 2]
     }
 }
 
@@ -181,31 +207,37 @@ struct HandStats {
     var results = 0
     var visionMs = 0.0
     var lastLog = CACurrentMediaTime()
+    /// An onHands call has not returned yet; results arriving meanwhile are dropped.
+    var inFlight = false
 }
 
 extension ARBridge {
-    /// While streaming with "hand-tracking" requested: hands the frame to the tracker (dropped if
-    /// it is busy) and sends every result, `[]` when no hand is found.
+    /// While streaming with "hand-tracking" requested: hands the frame to the tracker and sends
+    /// each result as `onHands({ t, hands })`, `hands: []` when none is found.
     func pushHandsIfNeeded(_ frame: ARFrame) {
         guard handsRequested, !handTracker.busy else { return }
-        let orientation = webView.window?.windowScene?.effectiveGeometry.interfaceOrientation ?? .portrait
         let generation = pageGeneration
-        handTracker.submit(frame, interfaceOrientation: orientation) { [weak self] result in
-            guard let self, self.streaming, self.handsRequested, self.pageGeneration == generation else { return }
+        handTracker.submit(frame) { [weak self] result in
+            guard let self, self.streaming, self.handsRequested, self.pageGeneration == generation,
+                  !self.handStats.inFlight else { return }
             let hands: [[String: Any]] = result.hands.map {
-                ["handedness": $0.handedness, "joints": $0.joints, "confidence": $0.confidence]
+                ["handedness": $0.handedness, "joints": $0.joints, "confidence": $0.confidence,
+                 "depthValid": $0.depthValid]
             }
-            self.call("onHands(hands)", ["hands": hands])
+            self.handStats.inFlight = true
+            self.call("onHands(update)", ["update": ["t": result.t, "hands": hands] as [String: Any]]) { [weak self] in
+                self?.handStats.inFlight = false
+            }
             self.handStats.results += 1
             self.handStats.visionMs += result.visionMs
             let now = CACurrentMediaTime(), elapsed = now - self.handStats.lastLog
             guard elapsed >= 2 else { return }
             let stats = self.handStats
-            let sides = result.hands.map(\.handedness).joined(separator: ",")
+            let sides = result.hands.map { "\($0.handedness):\($0.depthValid.nonzeroBitCount)/21" }.joined(separator: ",")
             print(String(format: "[bridge] hands sent n=%d visionMs=%.1f rate=%.1f%@", result.hands.count,
                          stats.visionMs / Double(max(stats.results, 1)), Double(stats.results) / elapsed,
-                         sides.isEmpty ? "" : " (\(sides))"))
-            self.handStats = HandStats(lastLog: now)
+                         sides.isEmpty ? "" : " (\(sides) depth)"))
+            self.handStats = HandStats(lastLog: now, inFlight: stats.inFlight)
         }
     }
 }

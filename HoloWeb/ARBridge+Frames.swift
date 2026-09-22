@@ -139,6 +139,7 @@ extension ARBridge: ARSessionDelegate {
         pushEnvironmentIfNeeded(frame)
         pushHandsIfNeeded(frame)
         pushMeshesIfNeeded(frame)
+        pushImagesIfNeeded(frame)
     }
 
     private func logStats(_ frame: ARFrame) {

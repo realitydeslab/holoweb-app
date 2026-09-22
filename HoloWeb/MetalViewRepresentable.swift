@@ -28,7 +28,7 @@ struct MetalViewRepresentable: UIViewRepresentable {
      }
     
      func updateUIView(_ uiView: MTKView, context: Context) {
-         context.coordinator.renderer?.drawsCameraImage = state.mode == .mono
+         context.coordinator.renderer?.drawsCameraImage = state.phase.blendsCamera
      }
     
      func makeCoordinator() -> Coordinator {

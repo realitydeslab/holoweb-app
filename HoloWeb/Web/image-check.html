@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+<head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>body{margin:0;background:transparent;color:#fff;font:13px -apple-system,sans-serif}pre{margin:70px 8px 8px;padding:8px;background:#0008;white-space:pre-wrap}</style>
+</head>
+<body><pre id="out"></pre>
+<script>
+// Raw-bridge check of setTrackedImages / onImages (plan/bridge_protocol.md).
+// Images: 0 = generated 512 px random block pattern, 1 = 1x1 pixel (must be untrackable),
+// 2 = the HoloWeb marker (assets/holoweb-marker.png, printed or shown 15 cm wide).
+// Tracking checks need the marker in view; the score checks do not.
+const out = document.getElementById("out");
+const log = (...a) => { const s = a.join(" "); console.log("[image-check] " + s); out.textContent += s + "\n"; };
+const native = (msg) => window.webkit.messageHandlers.holoweb.postMessage(msg);
+// Machine-readable results for Scripts/regression.py: "[check] PASS|FAIL <name> <detail>".
+const check = (name, ok, detail = "") => console.log(`[check] ${ok ? "PASS" : "FAIL"} ${name} ${detail}`);
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const MARKER_WIDTH = 0.15;
+
+let camera = null;
+const results = [];  // { at, list, camera }
+const bridge = {
+  onFrame(t, mode, transform) { camera = transform; },
+  onPlanes() {}, onAnchors() {}, onEnvironment() {}, onHands() {}, onMeshes() {}, onVisibility() {},
+  onImages(list) { results.push({ at: performance.now(), list, camera: camera && camera.slice() }); },
+  onSessionEnded(reason) { log("sessionEnded", reason); },
+};
+window.__holoweb = bridge;
+
+const toBase64Png = (canvas) => canvas.toDataURL("image/png").split(",")[1];
+function patternImage(size = 512, cells = 24) {
+  const c = document.createElement("canvas"); c.width = c.height = size;
+  const g = c.getContext("2d");
+  let seed = 12345; const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  g.fillStyle = "#fff"; g.fillRect(0, 0, size, size);
+  const cell = size / cells;
+  for (let y = 0; y < cells; y++) for (let x = 0; x < cells; x++) {
+    if (rand() < 0.5) { g.fillStyle = "#000"; g.fillRect(x * cell, y * cell, cell, cell); }
+  }
+  return c;
+}
+async function markerImage() {
+  const img = new Image(); img.src = "assets/holoweb-marker.png"; await img.decode();
+  const c = document.createElement("canvas"); c.width = img.naturalWidth; c.height = img.naturalHeight;
+  c.getContext("2d").drawImage(img, 0, 0);
+  return c;
+}
+const onePixel = () => { const c = document.createElement("canvas"); c.width = c.height = 1; return c; };
+const col = (m, i) => [m[4 * i], m[4 * i + 1], m[4 * i + 2]];
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const norm = (a) => { const l = Math.hypot(...a); return a.map(v => v / l); };
+
+(async () => {
+  const handle = typeof window.webkit?.createJSHandle === "function" ? window.webkit.createJSHandle(bridge) : null;
+  await native({ type: "ready", bridge: handle });
+  const canvases = [patternImage(), onePixel(), await markerImage()];
+  const images = canvases.map((c, index) => ({ index, widthInMeters: index === 1 ? 0.05 : MARKER_WIDTH, width: c.width, height: c.height, png: toBase64Png(c) }));
+  const reply = await native({ type: "setTrackedImages", images });
+  log("scores:", JSON.stringify(reply.scores));
+  check("image.scores", JSON.stringify(reply.scores) === JSON.stringify(["trackable", "untrackable", "trackable"]), JSON.stringify(reply.scores));
+  await native({ type: "requestSession", mode: "immersive-ar", features: ["local", "image-tracking"] });
+  const t0 = performance.now();
+  while (performance.now() - t0 < 15000 && !(results.some(r => r.list.some(i => i.tracked)) && performance.now() - t0 > 6000)) await sleep(250);
+  const all = results.flatMap(r => r.list.map(i => ({ ...i, camera: r.camera })));
+  const bad = all.filter(i => !Number.isInteger(i.index) || i.transform?.length !== 16 || !i.transform.every(Number.isFinite) || typeof i.tracked !== "boolean" || typeof i.measuredWidthInMeters !== "number");
+  check("image.results-shape", all.length > 0 && !bad.length, all.length ? `${all.length} results, ${bad.length} malformed` : "no onImages yet (marker not in view)");
+  const tracked = all.filter(i => i.tracked && i.index === 2);
+  check("image.marker-tracked", tracked.length > 0, tracked.length ? `${tracked.length} tracked results` : "marker not tracked: show assets/holoweb-marker.png 15 cm wide in front of the camera");
+  if (tracked.length) {
+    const last = tracked[tracked.length - 1], m = last.transform;
+    const x = norm(col(m, 0)), y = norm(col(m, 1)), z = norm(col(m, 2)), o = col(m, 3);
+    const ortho = Math.max(Math.abs(dot(x, y)), Math.abs(dot(y, z)), Math.abs(dot(x, z)));
+    const toCamera = last.camera ? norm([last.camera[12] - o[0], last.camera[13] - o[1], last.camera[14] - o[2]]) : [0, 0, 0];
+    log("marker at", o.map(v => v.toFixed(3)).join(","), "x", x.map(v => v.toFixed(2)).join(","), "y", y.map(v => v.toFixed(2)).join(","), "z", z.map(v => v.toFixed(2)).join(","), "width", last.measuredWidthInMeters.toFixed(3));
+    check("image.width", Math.abs(last.measuredWidthInMeters - MARKER_WIDTH) < 0.03, `${last.measuredWidthInMeters.toFixed(3)} m (expected ${MARKER_WIDTH} +- 0.03)`);
+    check("image.axes-orthonormal", ortho < 0.02, "max |dot| " + ortho.toFixed(3));
+    check("image.z-toward-viewer", dot(z, toCamera) > 0.5, "z . toCamera = " + dot(z, toCamera).toFixed(2));
+    // Holds when the image is upright (screen or wall); reported, but a flat image has no "up".
+    check("image.y-up-when-upright", Math.abs(z[1]) > 0.7 || y[1] > 0.7, `y.worldUp = ${y[1].toFixed(2)}, z.worldUp = ${z[1].toFixed(2)}`);
+  } else {
+    for (const name of ["image.width", "image.axes-orthonormal", "image.z-toward-viewer", "image.y-up-when-upright"]) check(name, false, "marker not tracked");
+  }
+  await native({ type: "endSession" });
+  log("DONE");
+})().catch(e => { log("ERROR", e.message); check("image.script", false, e.message); });
+</script>
+</body></html>
