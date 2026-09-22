@@ -20,10 +20,11 @@ Minimum OS: iOS 27.0. Transport uses `WKJSHandle` (iOS 27) so native calls into 
 | `endSession` | `{}` | `{ ok }` — native stops pushing frames |
 | `hitTest` | `{ origin: [x,y,z], direction: [x,y,z] }` (world space, metres) | `{ hits: [{ pose: number[16], type: "plane" \| "estimated" }] }` |
 | `setMode` | `{ mode: "mono" \| "stereo" }` | `{ ok }` |
+| `rendered` | `{ t }` ARFrame timestamp (ms) of the pose used for the XR frame just drawn; send once per XR frame, do not await | `null` — native draws the matching camera image (mono) |
 | `log` | `{ level, message }` | `{ ok }` |
 
 ## native -> JS calls (via `callAsyncJavaScript(functionBody, arguments:, in: nil, in: .page)` with the stored handle passed as `bridge`)
-`bridge.onFrame(t, mode, transform, view, proj, light, tracking, orientation)` once per ARFrame (60 Hz, coalesced: skip if previous call has not returned).
+`bridge.onFrame(t, mode, transform, view, proj, light, tracking, orientation, sentAt)` once per ARFrame (60 Hz, coalesced: skip if previous call has not returned).
 - `t`: ARFrame.timestamp in ms (Double)
 - `mode`: "mono" | "stereo"
 - `transform`: number[16] column-major display-oriented camera pose = `inverse(view)` (NOT raw `ARCamera.transform`, which is in sensor/landscape-right orientation). Use it directly as the WebXR viewer pose in `local` space.
@@ -31,6 +32,7 @@ Minimum OS: iOS 27.0. Transport uses `WKJSHandle` (iOS 27) so native calls into 
 - `proj`: number[16] column-major `ARCamera.projectionMatrix(for: orientation, viewportSize: webViewSizePx, zNear: 0.01, zFar: 1000)`. JS rewrites entries [10] and [14] from the session's depthNear/depthFar.
 - `light`: `{ ambientIntensity, ambientColorTemperature }` (lux, kelvin) or null
 - `tracking`: "normal" | "limited" | "notAvailable"
+- `sentAt`: native wall-clock send time, epoch ms (diagnostics: page computes one-way latency as `performance.timeOrigin + performance.now() - sentAt`)
 - `orientation`: "portrait" | "portraitUpsideDown" | "landscapeLeft" | "landscapeRight" (interface orientation used for view/proj)
 
 `bridge.onPlanes(planes)` at most 10 Hz when the plane set changed: `[{ id, transform: number[16], extent: [w, h], orientation: "horizontal" | "vertical" }]`.

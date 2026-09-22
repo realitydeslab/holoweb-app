@@ -9,10 +9,10 @@ const out = document.getElementById("out");
 const log = (...a) => { const s = a.join(" "); console.log("[bridge-check] " + s); out.textContent += s + "\n"; };
 const native = (msg) => window.webkit.messageHandlers.holoweb.postMessage(msg);
 
-let frames = 0, first = null, last = null, planes = 0, argsSeen = null;
+let frames = 0, first = null, last = null, planes = 0, argsSeen = null, lat = [];
 const bridge = {
-  onFrame(t, mode, transform, view, proj, light, tracking, orientation) {
-    frames++; last = { t, transform, tracking, orientation, mode };
+  onFrame(t, mode, transform, view, proj, light, tracking, orientation, sentAt) {
+    frames++; if (sentAt) lat.push(performance.timeOrigin + performance.now() - sentAt); last = { t, transform, tracking, orientation, mode };
     if (!first) { first = last; argsSeen = { tIsNumber: typeof t === "number", transformLen: transform.length, projLen: proj.length, light, tracking, orientation, mode }; }
   },
   onPlanes(list) { planes = list.length; },
@@ -34,6 +34,11 @@ window.__holoweb = bridge;  // fallback target
   await new Promise(r => setTimeout(r, 2000));
   const rate = (frames - f0) / ((performance.now() - t0) / 1000);
   log("onFrame calls/sec:", rate.toFixed(1));
+  const L = lat.slice(-120).sort((a, b) => a - b);
+  log("one-way latency ms p50/p90/max:", L[L.length >> 1].toFixed(1), L[Math.floor(L.length * 0.9)].toFixed(1), L[L.length - 1].toFixed(1));
+  let raf = 0; const r0 = performance.now();
+  await new Promise(done => { const tick = () => { raf++; if (last) native({ type: "rendered", t: last.t }); performance.now() - r0 < 2000 ? requestAnimationFrame(tick) : done(); }; requestAnimationFrame(tick); });
+  log("requestAnimationFrame Hz:", (raf / 2).toFixed(1), "(sent 'rendered' each tick)");
   log("first frame args:", JSON.stringify(argsSeen));
   const p0 = first.transform.slice(12, 15).map(v => v.toFixed(3)), p1 = last.transform.slice(12, 15).map(v => v.toFixed(3));
   log("camera position first:", p0.join(","), "latest:", p1.join(","), "tracking:", last.tracking);

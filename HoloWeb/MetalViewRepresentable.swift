@@ -17,6 +17,9 @@ struct MetalViewRepresentable: UIViewRepresentable {
 
          // Setup AR session
          let renderer = Renderer(session: state.session, metalDevice: mtkView.device!, renderDestination: mtkView)
+         renderer.frameSource = { [weak bridge = state.bridge] in
+             MainActor.assumeIsolated { bridge?.displayFrame }
+         }
          context.coordinator.renderer = renderer
          mtkView.delegate = context.coordinator
          renderer.drawRectResized(size: mtkView.bounds.size)

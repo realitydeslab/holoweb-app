@@ -114,3 +114,10 @@ three.js WebGPU-backend XR path needs only: `globalThis.XRGPUBinding` constructo
 - Deploy `server/.well-known/apple-app-site-association` to https://holoweb.app/.well-known/apple-app-site-association with `Content-Type: application/json` (see server/README.md). Until then universal links / real App Clip invocation cannot be tested; `_XCAppClipURL` is the only path.
 - App Store Connect: default App Clip experience + advanced experience for `https://holoweb.app/c`; replace `APP_STORE_ID` in the smart banner tag once the app record exists.
 - TestFlight invocation test of `https://holoweb.app/c?url=...` from Safari/Messages.
+
+### M3b latency measurements (iPhone 15 Pro, iOS 27, Web/bridge-check.html)
+- One-way native->page delivery via callAsyncJavaScript + WKJSHandle, wall clock sentAt vs performance.timeOrigin+now, last 120 frames: p50 0.5 ms, p90 1.2 ms, max 7.1 ms.
+- So the earlier ~17-20 ms was the completion-handler round trip (reply is delivered late), not delivery. Transport latency is negligible; the dominant delay is the page's rAF phase relative to ARFrame arrival (up to one 16.7 ms frame).
+- WKWebView requestAnimationFrame on this ProMotion device: 60.5 Hz (not 120).
+- `rendered` message sent every rAF tick while streaming: no drop in onFrame rate (60.0/s, 0 skipped).
+- Renderer now draws the camera image of the frame the page last reported via `rendered` (3-frame ring in ARBridge); falls back to the newest frame for pages that never report (non-polyfill pages).

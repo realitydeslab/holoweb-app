@@ -30,6 +30,13 @@ final class ARBridge: NSObject {
     private var lastPlanesSent: TimeInterval = 0
     private(set) var framesPushed = 0
     private(set) var framesSkipped = 0
+    /// Recently pushed frames, newest last. Kept small: ARKit's capture buffer pool is shallow and
+    /// holding too many ARFrames stalls tracking.
+    private var recentFrames: [ARFrame] = []
+    private static let recentFrameLimit = 3
+    /// ARFrame timestamp (ms) the page reported as rendered most recently.
+    private var renderedTimestamp: Double?
+
     private var arFrames = 0
     private var lastStatsTime: TimeInterval = 0
 
@@ -68,9 +75,22 @@ final class ARBridge: NSObject {
 
     private func resetPageState() {
         bridgeHandle = nil
+        recentFrames.removeAll()
+        renderedTimestamp = nil
         pageReady = false
         streaming = false
         framesInFlight = 0
+    }
+}
+
+// MARK: - Camera/content sync
+
+extension ARBridge {
+    /// The frame whose camera image the renderer should draw: the one matching the page's last
+    /// rendered pose when the page reports it, otherwise nil (renderer uses the newest frame).
+    var displayFrame: ARFrame? {
+        guard streaming, let t = renderedTimestamp else { return nil }
+        return recentFrames.last { $0.timestamp * 1000 <= t + 0.5 } ?? recentFrames.first
     }
 }
 
@@ -109,6 +129,9 @@ extension ARBridge: WKScriptMessageHandlerWithReply {
             }
             state?.setMode(mode)
             replyHandler(["ok": true], nil)
+        case "rendered":
+            renderedTimestamp = body["t"] as? Double
+            replyHandler(nil, nil)
         case "log":
             print("[web:\(body["level"] as? String ?? "log")] \(body["message"] as? String ?? "")")
             replyHandler(["ok": true], nil)
@@ -173,8 +196,10 @@ extension ARBridge: ARSessionDelegate {
                      "ambientColorTemperature": Double(estimate.ambientColorTemperature)]
         }
         framesInFlight += 1
+        recentFrames.append(frame)
+        if recentFrames.count > Self.recentFrameLimit { recentFrames.removeFirst() }
         framesPushed += 1
-        call("onFrame(t, mode, transform, view, proj, light, tracking, orientation)", [
+        call("onFrame(t, mode, transform, view, proj, light, tracking, orientation, sentAt)", [
             "t": frame.timestamp * 1000,
             "mode": state.mode.rawValue,
             "transform": view.inverse.columnMajor,
@@ -183,6 +208,7 @@ extension ARBridge: ARSessionDelegate {
             "light": light,
             "tracking": camera.trackingState.bridgeName,
             "orientation": orientation.bridgeName,
+            "sentAt": Date().timeIntervalSince1970 * 1000,
         ]) { [weak self] in
             guard let self else { return }
             self.framesInFlight = max(0, self.framesInFlight - 1)

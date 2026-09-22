@@ -96,6 +96,10 @@ class Renderer {
         didSet { if orientation != oldValue { viewportSizeDidChange = true } }
     }
 
+    /// Chooses which ARFrame's camera image to draw. Defaults to the newest frame; the web bridge
+    /// substitutes the frame whose pose the page last rendered, so camera and content stay in sync.
+    var frameSource: (() -> ARFrame?)?
+
     /// False in stereo (HoloKit optical see-through): the screen stays black behind the web layer.
     var drawsCameraImage = true
     
@@ -351,7 +355,7 @@ class Renderer {
     func updateGameState() {
         // Update any game state
         
-        guard let currentFrame = session.currentFrame else {
+        guard let currentFrame = frameSource?() ?? session.currentFrame else {
             return
         }
         
