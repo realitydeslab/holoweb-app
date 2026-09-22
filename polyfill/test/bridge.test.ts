@@ -188,6 +188,35 @@ describe('immersive-ar session', () => {
     expect(hw.bridge.device.stereoEnabled).toBe(false);
   });
 
+  it('stereo in a portrait window keeps both eyes on the portrait framebuffer', async () => {
+    const size = { w: innerWidth, h: innerHeight };
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 393 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 852 });
+    try {
+      hw.onFrame(2, 'stereo', Array.from(camPose), Array.from(camView), Array.from(arkitProj), null, 'normal', 'portrait');
+      const fb = { width: Math.round(393 * devicePixelRatio), height: Math.round(852 * devicePixelRatio) };
+      const vp = hw.bridge.device.nativeViewports;
+      for (const r of [vp.left!, vp.right!]) {
+        expect(r.x + r.width).toBeLessThanOrEqual(fb.width);
+        expect(r.y + r.height).toBeLessThanOrEqual(fb.height);
+        expect(r.height).toBeGreaterThan(r.width); // eyes stacked along the long (physical landscape) side
+      }
+      // left eye is nearer the device top (landscapeRight: device top points left)
+      expect(vp.left!.y).toBeGreaterThan(vp.right!.y);
+      // viewer right = device bottom: the centre-eye pose's x axis is the portrait camera's -y
+      const local = await session.requestReferenceSpace('local');
+      const pose = await inFrame(session, (f) => f.getViewerPose(local));
+      const m = pose!.transform.matrix;
+      expect([m[0], m[1], m[2]].map((v) => Math.round(v * 1e5) / 1e5)).toEqual(
+        [-camPose[4], -camPose[5], -camPose[6]].map((v) => Math.round(v * 1e5) / 1e5 + 0),
+      );
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: size.w });
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: size.h });
+      hw.onFrame(3, 'mono', Array.from(camPose), Array.from(camView), Array.from(arkitProj), null, 'normal');
+    }
+  });
+
   it('hit-tests the viewer ray against planes from onPlanes', async () => {
     // camera at y=1.5 looking straight down
     const down = mat4.fromRotationTranslation(mat4.create(), [-Math.SQRT1_2, 0, 0, Math.SQRT1_2], [0.2, 1.5, -1]);

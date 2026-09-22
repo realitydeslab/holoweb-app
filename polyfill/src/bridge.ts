@@ -36,7 +36,18 @@ import { PosePredictor } from './prediction.js';
 import type { NativeEnvironment } from './reflection.js';
 import { INERT_VIEWPORT } from './views.js';
 import { lookupPhone, type PhoneLookup } from './phones.js';
-import { clampIpd, computeStereo, IPD_DEFAULT, type PixelRect, type StereoParams } from './stereo.js';
+import {
+  clampIpd,
+  computeStereo,
+  framebufferTurn,
+  IPD_DEFAULT,
+  turnCameraBasis,
+  turnProjection,
+  turnRect,
+  type FramebufferTurn,
+  type PixelRect,
+  type StereoParams,
+} from './stereo.js';
 import { isRecord, type Transport } from './webkit.js';
 
 export type * from './bridge-types.js';
@@ -75,7 +86,7 @@ export class HoloWebBridge {
   readonly callbacks: NativeCallbacks;
 
   private lastLayout = '';
-  private stereoCache: { key: string; params: StereoParams } | null = null;
+  private stereoCache: { key: string; value: ReturnType<HoloWebBridge["stereo"]> } | null = null;
   private readonly cameraMatrix = mat4.create();
   private readonly poseMatrix = mat4.create();
 
@@ -189,14 +200,16 @@ export class HoloWebBridge {
     const device = this.device;
     const tracked = packet.tracking !== 'notAvailable';
     if (this.mode === 'stereo') {
-      const stereo = this.stereo();
+      const stereo = this.stereo(packet.orientation);
+      // HoloKit's eyes are defined in physical landscape; turn a portrait/landscapeLeft camera frame into it.
+      if (stereo.turn !== 0) mat4.multiply(cam, cam, turnCameraBasis(stereo.turn) as unknown as mat4);
       // No camera image to stay in sync with: extrapolate to the expected display time.
       const predicted = tracked ? this.predictor.predict({ t: packet.t, matrix: cam }) : cam;
       mat4.translate(this.poseMatrix, predicted, stereo.params.cameraToCenterEye);
       device.stereoEnabled = true;
       device.ipd = this.ipd;
-      device.nativeProjection.left = stereo.params.left.projection;
-      device.nativeProjection.right = stereo.params.right.projection;
+      device.nativeProjection.left = stereo.leftProjection;
+      device.nativeProjection.right = stereo.rightProjection;
       delete device.nativeProjection.none;
       device.nativeViewports.left = stereo.left;
       device.nativeViewports.right = stereo.right;
@@ -231,23 +244,45 @@ export class HoloWebBridge {
     this.predictor.reset();
   }
 
-  /** HoloKit parameters for the current phone, IPD and framebuffer size (cached). */
-  stereo(): { params: StereoParams; left: PixelRect; right: PixelRect } {
+  /**
+   * HoloKit parameters for the current phone, IPD and framebuffer (cached). Eyes are laid out in
+   * physical landscape, then turned into the framebuffer, which keeps its session-start
+   * orientation (stereo does not rotate the interface).
+   */
+  stereo(orientation?: string): {
+    params: StereoParams;
+    turn: FramebufferTurn;
+    left: PixelRect;
+    right: PixelRect;
+    leftProjection: Float32Array;
+    rightProjection: Float32Array;
+  } {
     const fb = nativeFramebufferSize();
+    const turn = framebufferTurn(fb, orientation ?? this.latest?.orientation);
     const info = this.deviceInfo;
     const screen = info
       ? { w: Math.max(info.screenWidthPx, info.screenHeightPx), h: Math.min(info.screenWidthPx, info.screenHeightPx) }
       : { w: Math.max(fb.width, fb.height), h: Math.min(fb.width, fb.height) };
     const { phone } = this.phone;
-    const key = `${phone.identifier}|${this.ipd}|${screen.w}x${screen.h}|${fb.width}x${fb.height}`;
+    const key = `${phone.identifier}|${this.ipd}|${screen.w}x${screen.h}|${fb.width}x${fb.height}|${turn}`;
     if (!this.stereoCache || this.stereoCache.key !== key) {
       const params = computeStereo(phone, { ...screen, scale: devicePixelRatioOrOne() }, this.ipd, 0.1, 1000);
-      this.stereoCache = { key, params };
+      const sx = Math.max(fb.width, fb.height) / screen.w;
+      const sy = Math.min(fb.width, fb.height) / screen.h;
+      const eye = (e: StereoParams['left']) => turnRect(scaleRect(e.viewport, sx, sy), fb, turn);
+      this.stereoCache = {
+        key,
+        value: {
+          params,
+          turn,
+          left: eye(params.left),
+          right: eye(params.right),
+          leftProjection: turnProjection(params.left.projection, turn),
+          rightProjection: turnProjection(params.right.projection, turn),
+        },
+      };
     }
-    const params = this.stereoCache.params;
-    const sx = Math.max(fb.width, fb.height) / screen.w;
-    const sy = Math.min(fb.width, fb.height) / screen.h;
-    return { params, left: scaleRect(params.left.viewport, sx, sy), right: scaleRect(params.right.viewport, sx, sy) };
+    return this.stereoCache.value;
   }
 
   private setLocalMode(mode: RenderMode): void {

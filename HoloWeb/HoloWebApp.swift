@@ -5,6 +5,7 @@ import SwiftUI
 
 @main
 struct HoloWebApp: App {
+    @UIApplicationDelegateAdaptor(OrientationLockAppDelegate.self) private var orientationLock
     @State private var state = HoloWebState()
 
     /// Home page: the holoweb.app gallery of WebXR experiences.

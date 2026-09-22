@@ -1,7 +1,16 @@
 import { mat4 } from 'gl-matrix';
 import { describe, expect, it } from 'vitest';
 import { lookupPhone, PHONES } from '../src/phones.js';
-import { applyDepthRange, computeStereo, HOLOKIT_X } from '../src/stereo.js';
+import {
+  applyDepthRange,
+  computeStereo,
+  framebufferTurn,
+  HOLOKIT_X,
+  turnCameraBasis,
+  turnProjection,
+  turnRect,
+  type PixelRect,
+} from '../src/stereo.js';
 
 // Golden values for iPhone14,2 (ScreenDpi 460, CameraOffset (0.042005,-0.05809,-0.00727),
 // ScreenBottomBorder 0.00347, runtime screen 2532x1170), ipd 0.064, near 0.06395, far 1000.
@@ -122,5 +131,60 @@ describe('lookupPhone', () => {
 
   it('has 24 entries ported from the asset', () => {
     expect(PHONES).toHaveLength(24);
+  });
+});
+
+describe('stereo in a portrait / landscapeLeft framebuffer (no interface rotation)', () => {
+  const s = computeStereo(iphone13Pro, screen, 0.064, NEAR, FAR);
+  const land = { width: 2532, height: 1170 };
+  const portrait = { width: 1170, height: 2532 };
+
+  // Eye-space point -> framebuffer pixel through projection + viewport (bottom-left origin).
+  const pixel = (p: Float32Array, r: PixelRect, q: [number, number, number]) => {
+    const c = [0, 1, 3].map((row) => p[row] * q[0] + p[4 + row] * q[1] + p[8 + row] * q[2] + p[12 + row]);
+    return [r.x + ((c[0] / c[2] + 1) / 2) * r.width, r.y + ((c[1] / c[2] + 1) / 2) * r.height];
+  };
+
+  it('picks the turn from the framebuffer shape and orientation', () => {
+    expect(framebufferTurn(portrait, 'portrait')).toBe(90);
+    expect(framebufferTurn(land, 'landscapeRight')).toBe(0);
+    expect(framebufferTurn(land, undefined)).toBe(0);
+    expect(framebufferTurn(land, 'landscapeLeft')).toBe(180);
+  });
+
+  it('keeps both eyes inside a portrait framebuffer (the off-canvas bug)', () => {
+    for (const eye of [s.left, s.right]) {
+      const r = turnRect(eye.viewport, portrait, 90);
+      expect(r.x).toBeGreaterThanOrEqual(0);
+      expect(r.y).toBeGreaterThanOrEqual(0);
+      expect(r.x + r.width).toBeLessThanOrEqual(portrait.width);
+      expect(r.y + r.height).toBeLessThanOrEqual(portrait.height);
+    }
+  });
+
+  it('lights the same physical pixel as the landscape layout', () => {
+    const points: [number, number, number][] = [[0, 0, -1], [0.2, 0.1, -1.5], [-0.3, -0.2, -0.8]];
+    for (const eye of [s.left, s.right]) {
+      for (const q of points) {
+        const [X, Y] = pixel(eye.projection, eye.viewport, q);
+        // landscapeRight -> portrait: x = Y, y = H - X
+        const [x, y] = pixel(turnProjection(eye.projection, 90), turnRect(eye.viewport, portrait, 90), q);
+        expect(x).toBeCloseTo(Y, 3);
+        expect(y).toBeCloseTo(portrait.height - X, 3);
+        // landscapeRight -> landscapeLeft: rotated 180 degrees
+        const [x2, y2] = pixel(turnProjection(eye.projection, 180), turnRect(eye.viewport, land, 180), q);
+        expect(x2).toBeCloseTo(land.width - X, 3);
+        expect(y2).toBeCloseTo(land.height - Y, 3);
+      }
+    }
+  });
+
+  it('turns the portrait camera frame into HoloKit landscape (viewer right = device bottom)', () => {
+    const b = turnCameraBasis(90);
+    const right = [b[0], b[1], b[2]];
+    const up = [b[4], b[5], b[6]];
+    expect(right).toEqual([0, -1, 0]);
+    expect(up).toEqual([1, 0, 0]);
+    expect(Array.from(turnCameraBasis(0))).toEqual(Array.from(mat4.create()));
   });
 });

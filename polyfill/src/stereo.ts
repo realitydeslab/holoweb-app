@@ -140,3 +140,52 @@ export function computeStereo(
 export function clampIpd(ipd: number): number {
   return Math.min(IPD_MAX, Math.max(IPD_MIN, ipd));
 }
+
+/**
+ * How the fixed framebuffer sits relative to HoloKit's physical landscape (UIKit landscapeRight:
+ * device top to the left). Stereo no longer rotates the interface, so a session started in
+ * portrait keeps a portrait framebuffer; the eyes are laid out in physical landscape and then
+ * turned into it.
+ * - 0: landscapeRight framebuffer, nothing to do.
+ * - 90: portrait framebuffer. Landscape (X right, Y up) -> portrait x = Y, y = H - X.
+ * - 180: landscapeLeft framebuffer, upside down relative to HoloKit.
+ */
+export type FramebufferTurn = 0 | 90 | 180;
+
+export function framebufferTurn(fb: { width: number; height: number }, orientation?: string): FramebufferTurn {
+  if (fb.height > fb.width) return 90;
+  return orientation === 'landscapeLeft' ? 180 : 0;
+}
+
+/** Map a landscape eye viewport (bottom-left origin) into the framebuffer (`fb` = its real size). */
+export function turnRect(r: PixelRect, fb: { width: number; height: number }, turn: FramebufferTurn): PixelRect {
+  if (turn === 90) return { x: r.y, y: fb.height - r.x - r.width, width: r.height, height: r.width };
+  if (turn === 180) return { x: fb.width - r.x - r.width, y: fb.height - r.y - r.height, width: r.width, height: r.height };
+  return r;
+}
+
+/** Clip-space turn applied after a landscape projection: NDC (u, v) -> (v, -u) or (-u, -v). */
+export function turnProjection(p: Float32Array, turn: FramebufferTurn): Float32Array {
+  if (turn === 0) return p;
+  const out = new Float32Array(p);
+  for (let c = 0; c < 4; c++) {
+    const x = p[c * 4];
+    const y = p[c * 4 + 1];
+    out[c * 4] = turn === 90 ? y : -x;
+    out[c * 4 + 1] = turn === 90 ? -x : -y;
+  }
+  return out;
+}
+
+/**
+ * Column-major rotation taking the display-oriented camera frame of the framebuffer's orientation
+ * to HoloKit's landscape camera frame (x = viewer right, y = viewer up): cam * this.
+ * Portrait camera: x = device right, y = device top; in landscapeRight the viewer's right is the
+ * device bottom and up is the device right.
+ */
+export function turnCameraBasis(turn: FramebufferTurn): Float32Array {
+  const m = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+  if (turn === 90) m.set([0, -1, 0, 0, 1, 0, 0, 0]);
+  if (turn === 180) m.set([-1, 0, 0, 0, 0, -1, 0, 0]);
+  return m;
+}

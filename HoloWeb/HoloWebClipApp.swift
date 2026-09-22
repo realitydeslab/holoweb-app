@@ -5,6 +5,7 @@ import SwiftUI
 
 @main
 struct HoloWebClipApp: App {
+    @UIApplicationDelegateAdaptor(OrientationLockAppDelegate.self) private var orientationLock
     @State private var state = HoloWebState()
 
     private static let defaultURL = URL(string: "https://holoweb.app/test2/")!

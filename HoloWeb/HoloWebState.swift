@@ -108,15 +108,27 @@ final class HoloWebState: NSObject {
         bridge = ARBridge(state: self, session: session, webView: webView)
     }
 
-    /// Switches mono/stereo. Stereo locks landscape with the home side on the right,
-    /// which is how the phone sits in HoloKit X (Unity's LandscapeLeft).
+    /// Switches mono/stereo. Stereo locks the interface in its current orientation: the page's
+    /// framebuffer was sized at session start and cannot follow a rotation, so the polyfill lays the
+    /// HoloKit eyes out in physical landscape and turns them into that framebuffer (stereo.ts).
     func setMode(_ newMode: RenderMode) {
         mode = newMode
         print("[state] mode -> \(newMode.rawValue), phase -> \(phase)")
         guard let scene = webView.window?.windowScene else { return }
-        let mask: UIInterfaceOrientationMask = newMode == .stereo ? .landscapeRight : .allButUpsideDown
+        let mask: UIInterfaceOrientationMask = newMode == .stereo
+            ? Self.lockMask(for: scene.effectiveGeometry.interfaceOrientation) : .allButUpsideDown
+        OrientationLock.mask = mask
+        scene.keyWindow?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
         scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { error in
             print("[state] orientation request failed: \(error.localizedDescription)")
+        }
+    }
+
+    private static func lockMask(for orientation: UIInterfaceOrientation) -> UIInterfaceOrientationMask {
+        switch orientation {
+        case .landscapeLeft: .landscapeLeft
+        case .landscapeRight: .landscapeRight
+        default: .portrait
         }
     }
 
@@ -323,5 +335,19 @@ extension HoloWebState: WKScriptMessageHandler {
             guard frame.isMainFrame || bridge?.accepts(frame) == true else { return }
             print("[web] \(text)")
         }
+    }
+}
+
+/// Interface orientations the app allows right now; stereo narrows it to the current orientation.
+/// `requestGeometryUpdate` alone rotates once but does not stop later auto-rotation.
+@MainActor
+enum OrientationLock {
+    static var mask: UIInterfaceOrientationMask = .allButUpsideDown
+}
+
+final class OrientationLockAppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+        MainActor.assumeIsolated { OrientationLock.mask }
     }
 }

@@ -715,3 +715,15 @@ Device (show.sh hands2, hands-check.html):
 ### Final baseline (Scripts/regression.py, iPhone 15 Pro, iOS 27, 2026-09-22 evening)
 - 209 passed / 7 failed at commit time (run started before c7a788d / 6e2d041). Failures: bridge.end-session-stops-frames (page ran out of time; window widened 34 -> 44 s), SuperSplat (pre-fix build; fixed by the test-click enabled wait), Babylon playground's own load timeout (flaky external; seconds raised to 75).
 - All 10 immersive-web samples, three.js (live + bundled), image tracking, hands, meshes, planes, VR, gallery (Needle x5, PlayCanvas, model-viewer, Toji, ball shooter) pass on device.
+
+## 2026-09-22 Stereo from portrait (bug fix)
+- Symptom: Start AR in portrait, tap stereo -> image squeezed into the bottom-right, rest black.
+- Cause: the page's framebuffer is fixed at session start (1179x2556 portrait); stereo viewports were laid out
+  for a 2556-wide landscape buffer, and `requestGeometryUpdate(.landscapeRight)` cannot resize the page's
+  render targets (and did not lock: iOS rotated back).
+- Fix: stereo no longer rotates the interface; it locks the current orientation (OrientationLock app delegate).
+  The polyfill lays HoloKit eyes out in physical landscape and turns them into the framebuffer
+  (stereo.ts framebufferTurn/turnRect/turnProjection/turnCameraBasis: portrait = 90, landscapeLeft = 180).
+- Verified: vitest (same physical pixel as landscape layout; eyes inside portrait fb), device demo.html portrait
+  -> stereo shows two eyes stacked along the long side.
+- Gotcha: after `npm run build`, run `Scripts/sync-polyfill.sh` or the app ships the old HoloWeb/Web copy.
