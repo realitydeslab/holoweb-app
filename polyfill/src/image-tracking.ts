@@ -14,24 +14,12 @@
  */
 import { mat4 } from 'gl-matrix';
 import { P_DEVICE, P_FRAME, P_SPACE, XRDevice, XRFrame, XRSession, XRSpace, XRSystem } from 'iwer';
+import { encodeTrackedImages, snapshotErrors, type NativeTrackedImage, type TrackedImageInit } from './image-snapshot.js';
+
+export type { NativeTrackedImage, TrackedImageInit } from './image-snapshot.js';
 
 export type XRImageTrackingScore = 'untrackable' | 'trackable';
 export type XRImageTrackingState = 'tracked' | 'emulated';
-
-export interface TrackedImageInit {
-  image: ImageBitmap;
-  widthInMeters: number;
-}
-
-/** One `setTrackedImages` entry. */
-export interface NativeTrackedImage {
-  index: number;
-  widthInMeters: number;
-  width: number;
-  height: number;
-  /** base64 PNG */
-  png: string;
-}
 
 export interface NativeImageResult {
   index: number;
@@ -40,7 +28,6 @@ export interface NativeImageResult {
   measuredWidthInMeters?: number;
 }
 
-export const MAX_IMAGE_PX = 1024;
 const FEATURE = 'image-tracking';
 
 export class XRImageTrackingResult {
@@ -68,36 +55,6 @@ export class XRImageTrackingResult {
   get measuredWidthInMeters(): number {
     return this.#width;
   }
-}
-
-/** Snapshot of one image, drawn now (the explainer: later changes to the source have no effect). */
-function snapshot(init: TrackedImageInit | undefined): HTMLCanvasElement | null {
-  const image = init?.image;
-  if (!image || !(Number(init.widthInMeters) > 0) || !(image.width > 0) || !(image.height > 0)) return null;
-  try {
-    const scale = Math.min(1, MAX_IMAGE_PX / Math.max(image.width, image.height));
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(image.width * scale));
-    canvas.height = Math.max(1, Math.round(image.height * scale));
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
-    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-    return canvas;
-  } catch (err) {
-    console.warn('HoloWeb image-tracking: image not drawable', err);
-    return null;
-  }
-}
-
-/** Snapshot every image synchronously; PNG-encode the drawable ones (null = untrackable locally). */
-export function encodeTrackedImages(images: readonly TrackedImageInit[]): (NativeTrackedImage | null)[] {
-  return images.map((init, index) => {
-    const canvas = snapshot(init);
-    if (!canvas) return null;
-    const url = canvas.toDataURL('image/png');
-    const png = url.slice(url.indexOf(',') + 1);
-    return png ? { index, widthInMeters: Number(init.widthInMeters), width: canvas.width, height: canvas.height, png } : null;
-  });
 }
 
 /** Carries the snapshots from the outermost requestSession wrapper to the session hook. */
@@ -134,7 +91,7 @@ export class ImageTracking {
   private readonly sessionScores = new WeakMap<XRSession, Promise<readonly XRImageTrackingScore[]>>();
   private readonly perFrame = new WeakMap<XRFrame, readonly XRImageTrackingResult[]>();
   /** Diagnostics (e2e, device): page queries, frames with results, the last scores. */
-  readonly stats = { resultQueries: 0, framesWithResults: 0, lastScores: [] as readonly XRImageTrackingScore[] };
+  readonly stats = { resultQueries: 0, framesWithResults: 0, lastScores: [] as readonly XRImageTrackingScore[], snapshotErrors };
 
   constructor(private readonly device: XRDevice) {
     const self = this;

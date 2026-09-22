@@ -6,7 +6,7 @@ import { createServer } from 'node:http';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { extname, join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { chromium, webkit } from 'playwright';
 import { runFrameChecks } from './e2e-frames.mjs';
 import { runHandChecks } from './e2e-hands.mjs';
 import { runImageChecks } from './e2e-images.mjs';
@@ -34,11 +34,19 @@ const server = createServer(async (req, res) => {
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${server.address().port}`;
 
-const browser = await chromium.launch({
-  headless: true,
-  channel: 'chromium',
-  args: ['--enable-unsafe-webgpu', '--enable-gpu', '--use-angle=metal', '--ignore-gpu-blocklist'],
-});
+// HOLOWEB_E2E_BROWSER=webkit runs everything in Playwright's WebKit (closest to WKWebView); the default
+// Chromium run also repeats the image-tracking cases in WebKit (device bug: snapshot failed in WebKit only).
+const ENGINE = process.env.HOLOWEB_E2E_BROWSER === 'webkit' ? 'webkit' : 'chromium';
+const launch = (engine) =>
+  engine === 'webkit'
+    ? webkit.launch({ headless: true })
+    : chromium.launch({
+        headless: true,
+        channel: 'chromium',
+        args: ['--enable-unsafe-webgpu', '--enable-gpu', '--use-angle=metal', '--ignore-gpu-blocklist'],
+      });
+const browser = await launch(ENGINE);
+console.log(`e2e engine: ${ENGINE} ${browser.version()}`);
 mimicWKWebView(browser); // no Chromium WebXR: the polyfill must supply every global
 
 const cases = process.env.HOLOWEB_E2E_ONLY === 'samples' ? [] : [
@@ -58,7 +66,7 @@ const cases = process.env.HOLOWEB_E2E_ONLY === 'samples' ? [] : [
 ];
 
 let failures = 0;
-await mkdir(shotDir, { recursive: true });
+await mkdir(join(shotDir, 'webkit'), { recursive: true });
 for (const c of cases) {
   const context = await browser.newContext({ viewport: { width: 844, height: 390 }, deviceScaleFactor: 2 });
   const page = await context.newPage();
@@ -237,6 +245,15 @@ for (const check of process.env.HOLOWEB_E2E_ONLY === 'samples' ? [runSampleCheck
   const r = await check({ browser, base, root, shotDir });
   failures += r.failures;
   for (let i = 0; i < r.cases; i++) cases.push({ page: check.name });
+}
+
+if (ENGINE === 'chromium' && process.env.HOLOWEB_E2E_ONLY !== 'samples') {
+  const wk = mimicWKWebView(await launch('webkit'));
+  console.log(`image tracking in WebKit ${wk.version()}:`);
+  const r = await runImageChecks({ browser: wk, base, root, shotDir: join(shotDir, 'webkit') });
+  failures += r.failures;
+  for (let i = 0; i < r.cases; i++) cases.push({ page: 'webkit:image-tracking' });
+  await wk.close();
 }
 
 await browser.close();

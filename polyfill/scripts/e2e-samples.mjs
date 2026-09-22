@@ -180,7 +180,8 @@ const SAMPLES = {
   },
   'tests/interrupted-ar': {
     // the page throws on purpose right after the session resolves, then sets its layer 5 s later
-    allow: [/Exception is not defined/],
+    // the sample itself throws `new Exception(...)` (undefined in JS); Chromium and WebKit word it differently
+    allow: [/Exception is not defined|Can't find variable: Exception/],
     allowNoFrames: true, // no layer (so no XR frames) for the first 5 s, by design
     async run(page, problems) {
       const early = await page.evaluate(() => Boolean(window.__holoweb.bridge.device.activeSession?.renderState.baseLayer));

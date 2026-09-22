@@ -59,8 +59,23 @@ const dist = (j, a, b) => Math.hypot(j[3 * a] - j[3 * b], j[3 * a + 1] - j[3 * b
     const median = sizes[sizes.length >> 1];
     check("hands.plausible-size", median > 0.08 && median < 0.3, "wrist-middle tip median " + median.toFixed(3) + " m");
     const last = withHands[withHands.length - 1];
+    // First-person chirality: with two hands in view, the one further left on screen must be
+    // "left". Camera-space x from the display-oriented pose: column 0 is screen right.
+    const pairs = withHands.filter(c => c.hands.length === 2 && c.pose);
+    if (pairs.length >= 5) {
+      const screenX = (pose, j) => (j[0] - pose[12]) * pose[0] + (j[1] - pose[13]) * pose[1] + (j[2] - pose[14]) * pose[2];
+      const good = pairs.filter(c => {
+        const [h0, h1] = c.hands, x0 = screenX(c.pose, h0.joints), x1 = screenX(c.pose, h1.joints);
+        const leftmost = x0 < x1 ? h0 : h1, rightmost = x0 < x1 ? h1 : h0;
+        return leftmost.handedness === "left" && rightmost.handedness === "right";
+      }).length;
+      const vision = pairs[pairs.length - 1].hands.map(h => h.visionChirality).join(",");
+      check("hands.chirality-first-person", good / pairs.length >= 0.9, `${good}/${pairs.length} two-hand results left-of-screen = left (Vision said ${vision})`);
+    } else {
+      check("hands.chirality-first-person", false, `needs two hands in view (${pairs.length} two-hand results)`);
+    }
     const sides = {}; all.forEach(h => sides[h.handedness] = (sides[h.handedness] || 0) + 1);
-    log("handedness counts:", JSON.stringify(sides), "(right hand only in view should read mostly right)");
+    log("handedness counts:", JSON.stringify(sides), "(geometric, assumes the back of the hand faces the camera)");
     // Depth spread along the camera's view axis (-Z of the pose): for a flat photo on a screen this
     // is the screen's tilt over the hand, not finger depth noise.
     if (last.pose) {

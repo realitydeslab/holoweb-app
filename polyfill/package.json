@@ -9,7 +9,8 @@
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit -p .",
     "test": "vitest run",
-    "test:e2e": "node scripts/e2e.mjs"
+    "test:e2e": "node scripts/e2e.mjs",
+    "test:e2e:webkit": "HOLOWEB_E2E_BROWSER=webkit node scripts/e2e.mjs"
   },
   "dependencies": {
     "gl-matrix": "3.4.4",

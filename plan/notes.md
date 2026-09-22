@@ -622,3 +622,21 @@ Changes:
   - PlayCanvas image tracking: setTrackedImages n=1 trackable, ARKit n=1.
   - Needle: n=2 trackable, ARKit n=2.
   - PlayCanvas and Needle track their own marker images, not the HoloWeb marker, so their tracked=true needs those images on screen.
+
+## Polyfill execution log (image snapshot in WebKit, e2e under WebKit)
+
+- Device bug: examples/image-tracking.html on the iPhone scored ["untrackable"] and never sent setTrackedImages.
+  - The snapshot returned null without saying why. The old `console.warn(err)` reaches native's log as `{}`.
+  - The code already used a DOM <canvas> + toDataURL, not OffscreenCanvas.
+  - Playwright WebKit 26.6 over http does not reproduce it (drawImage and toDataURL work), so the failure is specific to WKWebView, probably the holoweb-app:// scheme.
+  - A cross-origin (tainted) bitmap in WebKit throws SecurityError from toDataURL. That used to reject requestSession; it now scores untrackable with a logged reason.
+- Fix, in the new src/image-snapshot.ts:
+  - Every failure is logged as `HoloWeb image-tracking: image N: <step>: <Error.name>: <message> -> untrackable` and kept in `__holoweb.images.stats.snapshotErrors`.
+  - If drawing the ImageBitmap fails (throws, no size, or toDataURL returns something other than PNG, e.g. "data:,"), the element it was created from is drawn instead. `installBitmapSourceTracking` wraps createImageBitmap and remembers the source of each uncropped, option-less element call. Native's raw page shows that <img> + canvas + toDataURL works on the device.
+  - Unit tests in test/image-snapshot.test.ts: logged name and message, the fallback to the source element, "data:," rejected.
+- e2e:
+  - `npm run test:e2e` (Chromium) now also runs the 3 image-tracking cases in Playwright WebKit (39 cases).
+  - `npm run test:e2e:webkit` runs the whole suite in WebKit (36 cases, WebGPU included).
+  - The only WebKit-only failure was interrupted-ar's intentional `new Exception()`, which WebKit words "Can't find variable: Exception"; the allow-list now accepts both wordings.
+- Verification: npm test 111/111 (17 files); e2e Chromium + WebKit images 39/39; e2e WebKit full 36/36 (interrupted-ar rerun after the allow-list fix).
+- On the device, if it still fails: read `__holoweb.images.stats.snapshotErrors` or the warn line in native's log.

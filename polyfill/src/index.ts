@@ -8,6 +8,7 @@ import { NativeAnchors } from './anchors.js';
 import { HoloWebBridge, type NativeCallbacks } from './bridge.js';
 import { createHoloKitDevice, featuresFor } from './device.js';
 import { HandTracking } from './hand-input.js';
+import { installBitmapSourceTracking } from './image-snapshot.js';
 import { ImageTracking, installImageSnapshot } from './image-tracking.js';
 import { installGPUBinding, needsPrimingView } from './gpu-binding.js';
 import { installWebXRGlobals, missingWebXRGlobals } from './globals.js';
@@ -92,6 +93,7 @@ export function install(): HoloWebGlobal {
   });
   installFrameHooks(device, bridge);
   installImageSnapshot(device); // outermost requestSession wrapper
+  installBitmapSourceTracking();
   installLightEstimation(() => bridge.latest?.light);
   installReflectionBinding(reflections);
   installTransientHitTest(environment);
