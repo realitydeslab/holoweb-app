@@ -60,12 +60,13 @@ Test sources: **R** = `Scripts/regression.py` (on device) · **U** = `polyfill` 
 | ID | Item | Status | Tests |
 |---|---|---|---|
 | D1 | `immersive-ar` supported | device | U ar-module-conformance |
-| D2 | `environmentBlendMode`: alpha-blend (mono), additive (stereo), opaque (VR) | headless (VR wip) | U |
+| D2 | `environmentBlendMode`: alpha-blend (mono), additive (stereo), opaque (VR) | headless | U ar-module-conformance (VR opaque case); E exit-button |
 | D3 | `interactionMode`: screen-space (mono), world-space (stereo) | headless | U |
 | D4 | `XRView.isFirstPersonObserver` = false; `secondary-views` not granted | headless | U |
 | D5 | Screen input: transient `screen` source, generic-touchscreen, select events | headless | U |
 | D6 | No camera image exposure | headless | U |
 | D7 | NotSupportedError for unsupported required features | headless | U |
+| D8 | Every WebXR interface global installed (WKWebView has none; XRRay per spec DOMPointInit defaults) | headless (e2e strips Chromium's XR* + navigator.xr) | U globals; E WebXR globals under WKWebView conditions (all 30 cases run stripped) |
 
 ## E. AR features ([specs](holoweb_plan.md))
 
@@ -74,14 +75,14 @@ Test sources: **R** = `Scripts/regression.py` (on device) · **U** = `polyfill` 
 | E1 | hit-test (+ transient input for screen taps) | device | R three-hittest; E |
 | E2 | anchors (ARKit ARAnchor), createAnchor from earlier hit result | device (raw), headless (samples) | R bridge.anchor-roundtrip, xr.anchor-*; E |
 | E3 | plane-detection (polygons, stable XRPlane identity, lastChanged) | device (env-plane-check 5/5 on the laptop screen: vertical plane 0.55x0.20 m, 7-vertex CCW polygon) | R planes.*, three-plane-detection.planes, iw-plane-detection.planes; human (surfaces in view) |
-| E4 | mesh-detection (LiDAR ARMeshAnchor, ≤2 Hz, changed only, ~2 MB split, semanticLabel) | native device-built (reconstruction on, no meshes while still); polyfill wip | R mesh.reconstruction-enabled, mesh.no-errors, mesh.* (when meshes), iw-mesh-detection; human |
+| E4 | mesh-detection (LiDAR ARMeshAnchor, ≤2 Hz, changed only, ~2 MB split, semanticLabel) | native device-built (reconstruction on, no meshes while still); polyfill headless (U meshes, E mesh-detection sample) | R mesh.reconstruction-enabled, mesh.no-errors, mesh.* (when meshes), iw-mesh-detection; human |
 | E5 | light-estimation: XRLightProbe, estimate, reflection cube map (32 px sRGB) | device (env map) | R env.*, three-lighting.environment |
-| E6 | hand-tracking (Vision + LiDAR, 25 joints, pinch select, grab squeeze, One Euro) | native device (G10 payload `{t, hands}`, 27–60 results/s, Vision 7–11 ms; no hand yet); JS headless | R hands.tracker-rate, hands.timestamp, hands.log-line, hands.no-errors, hands.* (when a hand), iw-hands.hands, iw-webgpu-hands.hands; human (hand, chirality) |
+| E6 | hand-tracking (Vision + LiDAR, 25 joints, pinch select, grab squeeze, One Euro) | native device (G10 payload `{t, hands}`, 27–60 results/s, Vision 7–11 ms; no hand yet); JS headless (U hands, hand-gestures; E three-ar-hands, immersive-hands) | R hands.tracker-rate, hands.timestamp, hands.log-line, hands.no-errors, hands.* (when a hand), iw-hands.hands, iw-webgpu-hands.hands; human (hand, chirality) |
 | E7 | image-tracking ([explainer](https://github.com/immersive-web/image-tracking/blob/main/explainer.md)): trackedImages, scores, results, imageSpace convention (`anchor * Rx(-90°)`) | device (native): marker on laptop screen tracked, 279 results, width 0.150 m, axes orthonormal, +Z·toCamera 0.79, +Y up 0.86; polyfill page wip | R image.scores, image.arkit-detection-images, image.* (when tracked), *-image-tracking.set-tracked-images / image-tracking-run / image-tracked; human |
 | E8 | dom-overlay (root = body, beforexrselect) | headless | U dom-overlay; E plane-detection sample |
 | E9 | local-floor from lowest plane + reset event | headless | U light-floor |
 | E10 | Inline + immersive sessions coexist; inline canvas untouched | headless | U inline-sessions; E anchors, interrupted-ar |
-| E11 | Visibility on interruption / background (onVisibility) | device (background via Settings: hidden → visible, streaming resumed at 60 fps) | M (devicectl app switch); R iw-interrupted-ar |
+| E11 | Visibility on interruption / background (onVisibility) | device (background via Settings: hidden → visible, streaming resumed at 60 fps); polyfill headless | M (devicectl app switch); R iw-interrupted-ar; U visibility |
 | E12 | LiDAR capability in `ready` (`capabilities {lidar, sceneReconstruction, handTracking}`) | native built | U |
 
 ## F. Test pages (each must pass; R = device regression entry)
@@ -93,8 +94,8 @@ Immersive Web samples:
 | F2 | [webgpu/immersive-ar-session](https://immersive-web.github.io/webxr-samples/webgpu/immersive-ar-session.html) | pass |
 | F3 | [anchors](https://immersive-web.github.io/webxr-samples/anchors.html) | device pass (R iw-anchors.*) |
 | F4 | [hit-test-anchors](https://immersive-web.github.io/webxr-samples/hit-test-anchors.html) | device pass (R iw-hit-test-anchors.*) |
-| F5 | [proposals/plane-detection](https://immersive-web.github.io/webxr-samples/proposals/plane-detection.html) | device enters AR; page throws `XRRay` missing (polyfill); planes need surfaces |
-| F6 | [proposals/mesh-detection](https://immersive-web.github.io/webxr-samples/proposals/mesh-detection.html) | native ready; polyfill rejects mesh-detection (wip) |
+| F5 | [proposals/plane-detection](https://immersive-web.github.io/webxr-samples/proposals/plane-detection.html) | device enters AR; `XRRay` global fixed (D8, headless under WKWebView conditions), device recheck pending; planes need surfaces |
+| F6 | [proposals/mesh-detection](https://immersive-web.github.io/webxr-samples/proposals/mesh-detection.html) | native ready; polyfill supports mesh-detection (headless pass, capability-gated on LiDAR), device recheck pending |
 | F7 | [immersive-hands](https://immersive-web.github.io/webxr-samples/immersive-hands.html) | device enters, onHands 60/s; hand in view: human |
 | F8 | [webgpu/immersive-hands](https://immersive-web.github.io/webxr-samples/webgpu/immersive-hands.html) | device enters, onHands 60/s; hand in view: human |
 | F9 | [tests/interrupted-ar](https://immersive-web.github.io/webxr-samples/tests/interrupted-ar.html) | device enters AR (page's intended throw ignored) |

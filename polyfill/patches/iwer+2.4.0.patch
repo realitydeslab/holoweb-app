@@ -134,10 +134,47 @@ index 01e78cc..f958cf3 100644
          eyes.forEach((eye) => {
              const viewSpace = device.viewSpaces[eye];
 diff --git a/node_modules/iwer/lib/hittest/XRRay.js b/node_modules/iwer/lib/hittest/XRRay.js
-index eafdd9e..f99b672 100644
+index eafdd9e..a1ac1d5 100644
 --- a/node_modules/iwer/lib/hittest/XRRay.js
 +++ b/node_modules/iwer/lib/hittest/XRRay.js
-@@ -72,7 +72,8 @@ export class XRRay {
+@@ -31,20 +31,25 @@ export class XRRay {
+         }
+         else {
+             if (origin) {
+-                _origin.x = origin.x;
+-                _origin.y = origin.y;
+-                _origin.z = origin.z;
+-                _origin.w = origin.w;
++                // HOLOWEB: DOMPointInit defaults (x, y, z 0; w 1); the spec requires origin.w == 1
++                _origin.x = origin.x ?? 0;
++                _origin.y = origin.y ?? 0;
++                _origin.z = origin.z ?? 0;
++                _origin.w = origin.w ?? 1;
++                if (_origin.w !== 1) {
++                    throw new TypeError('XRRay origin.w must be 1');
++                }
+             }
+             if (direction) {
+-                if ((direction.x === 0 && direction.y === 0 && direction.z === 0) ||
+-                    direction.w !== 0) {
+-                    throw new DOMException('Invalid direction value to construct XRRay', 'TypeError');
++                // HOLOWEB: DOMPointInit defaults (w 1, so a direction must pass w: 0); spec TypeError
++                const d = { x: direction.x ?? 0, y: direction.y ?? 0, z: direction.z ?? 0, w: direction.w ?? 1 };
++                if ((d.x === 0 && d.y === 0 && d.z === 0) || d.w !== 0) {
++                    throw new TypeError('Invalid direction value to construct XRRay');
+                 }
+-                _direction.x = direction.x;
+-                _direction.y = direction.y;
+-                _direction.z = direction.z;
+-                _direction.w = direction.w;
++                _direction.x = d.x;
++                _direction.y = d.y;
++                _direction.z = d.z;
++                _direction.w = d.w;
+             }
+         }
+         const length = Math.sqrt(_direction.x * _direction.x +
+@@ -72,7 +77,8 @@ export class XRRay {
          const z = vec3.set(vec3.create(), 0, 0, -1);
          const origin = vec3.set(vec3.create(), this[P_RAY].origin.x, this[P_RAY].origin.y, this[P_RAY].origin.z);
          const direction = vec3.set(vec3.create(), this[P_RAY].direction.x, this[P_RAY].direction.y, this[P_RAY].direction.z);

@@ -37,7 +37,7 @@ export async function runGlobalsChecks({ browser, base }) {
       const native = Object.getOwnPropertyNames(globalThis).filter(
         (n) => /^XR[A-Z]/.test(n) && typeof globalThis[n] === 'function' && /\[native code\]\s*\}\s*$/.test(Function.prototype.toString.call(globalThis[n])),
       );
-      const ray = new XRRay(new DOMPoint(0, 1, 0), new DOMPoint(0, 0, -2));
+      const ray = new XRRay(new DOMPoint(0, 1, 0), { x: 0, y: 0, z: -2, w: 0 });
       const fromTransform = new XRRay(new XRRigidTransform({ x: 1, y: 0, z: 0 }));
       return {
         missing: window.__holoweb.missingGlobals(),

@@ -513,3 +513,19 @@ Tune on device: HAND_FILTER in src/one-euro.ts and SQUEEZE_ON/OFF in src/hands.t
 - Fixture: holoweb-marker.png shown full-screen in Safari on the built-in display at 750 pt ≈ 15.0 cm (panel 30.2 cm / 1512 pt). Scratchpad `show.sh marker|hand` switches it; Safari must be in its own full-screen Space, otherwise any Chrome activation raises a leftover Chrome window over it (that happened twice and was the cause of the first "not tracked" runs).
 - image-check.html: scores [trackable, untrackable, trackable]; 279 tracked results in ~20 s, 0 malformed; measuredWidthInMeters 0.150 (expected 0.15); axes orthonormal; +Z · (to camera) 0.79; +Y · worldUp 0.86 (screen tilted back). Confirms the anchor.transform * Rx(-90°) imageSpace convention.
 - Device screenshots: `xcrun devicectl device capture screenshot --device <udid> --destination <png>`.
+
+## Polyfill execution log (P0: WebXR globals, e2e under WKWebView conditions)
+
+- Cause: WKWebView has no WebXR globals. IWER's installRuntime sets 27 of them. Headless Chromium ships its own XRRay, XRPlane, XRHitTestResult, ..., which hid the gap; the device showed it as "Can't find variable: XRRay" in proposals/plane-detection.
+- Fix: src/globals.ts installs the rest and holds the canonical list (`WEBXR_GLOBALS`, 42 names; `__holoweb.missingGlobals()` reports gaps on device):
+  - XRRay, XRBoundedReferenceSpace, XRHitTestSource/Result
+  - XRAnchor/Set, XRPlane/Set, XRMesh/Set
+  - XRCPUDepthInformation, XRWebGLDepthInformation
+  - XRProjectionLayer (also without WebGPU)
+  - Dictionaries and enums (XRDOMOverlayState, XRSessionMode) have no browser global and are not installed.
+  - XRImageTrackingResult joins the list with image tracking.
+- IWER XRRay bug fixed (patch, HOLOWEB): a missing DOMPointInit `w` became undefined. It now defaults to 1 as in the spec, so `{z:-1}` without `w:0` throws TypeError, as in Chrome, and origin.w != 1 throws.
+- e2e: scripts/e2e-wkwebview.mjs wraps browser.newContext. Every frame of every context deletes Chromium's native XR* constructors and Navigator.prototype.xr before page scripts. Only native-code functions are deleted, so init-script order does not matter.
+  - New case "WebXR globals under WKWebView conditions": no Chromium XR* left, none missing, XRRay checks, navigator.xr is the polyfill's.
+  - The e2e server now reads a file before writeHead. A 404 after writeHead(200) had crashed the run.
+- Result: 30/30 e2e with Chromium's WebXR stripped (all 10 samples, three.js r186 fixtures, r111/r152, A-Frame live, iframe, hands, demo). Nothing else depended on Chromium globals. npm test 101/101 (new test/globals.test.ts).
