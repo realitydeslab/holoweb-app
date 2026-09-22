@@ -689,3 +689,4 @@ Device (show.sh hands2, hands-check.html):
   - Side effect: a uniform image (the 1x1 test image) is now untrackable locally, without reaching native.
 - Tests: test/image-snapshot.test.ts covers willReadFrequently plus the white fill, blank then recovered on retry 1, blank x4 then untrackable, the first pass synchronous, and the earlier fallback and error cases.
 - Verification: npm test 115/115; e2e 40/40 (Chromium + WebKit image cases); WebKit full 37/37.
+- Image-tracking blank-snapshot fix (a1f6bf5) on device: 8/8 launches of examples/image-tracking.html scored trackable and tracked the on-screen marker; the first draw came back blank in 4/8 and was recovered on retry 1–2. The WKWebView canvas readback issue is real and frequent; the retry path is load-bearing.
