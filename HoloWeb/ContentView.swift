@@ -25,7 +25,7 @@ struct ContentView: View {
             HStack {
                 Spacer()
                 Button {
-                    state.mode = state.mode == .mono ? .stereo : .mono
+                    state.setMode(state.mode == .mono ? .stereo : .mono)
                 } label: {
                     Image(systemName: state.mode == .mono ? "vision.pro" : "iphone")
                 }

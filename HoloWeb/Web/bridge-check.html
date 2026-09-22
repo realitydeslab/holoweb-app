@@ -1,0 +1,57 @@
+<!doctype html>
+<html>
+<head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>body{margin:0;background:transparent;color:#fff;font:13px -apple-system,sans-serif}pre{margin:70px 8px 8px;padding:8px;background:#0008;white-space:pre-wrap}</style>
+</head>
+<body><pre id="out"></pre>
+<script>
+const out = document.getElementById("out");
+const log = (...a) => { const s = a.join(" "); console.log("[bridge-check] " + s); out.textContent += s + "\n"; };
+const native = (msg) => window.webkit.messageHandlers.holoweb.postMessage(msg);
+
+let frames = 0, first = null, last = null, planes = 0, argsSeen = null;
+const bridge = {
+  onFrame(t, mode, transform, view, proj, light, tracking, orientation) {
+    frames++; last = { t, transform, tracking, orientation, mode };
+    if (!first) { first = last; argsSeen = { tIsNumber: typeof t === "number", transformLen: transform.length, projLen: proj.length, light, tracking, orientation, mode }; }
+  },
+  onPlanes(list) { planes = list.length; },
+  onSessionEnded(reason) { log("sessionEnded", reason); },
+};
+window.__holoweb = bridge;  // fallback target
+
+(async () => {
+  const hasHandle = typeof window.webkit?.createJSHandle === "function";
+  log("createJSHandle available:", String(hasHandle));
+  const handle = hasHandle ? window.webkit.createJSHandle(bridge) : null;
+  const ready = await native({ type: "ready", bridge: handle });
+  log("ready reply:", JSON.stringify(ready));
+  const session = await native({ type: "requestSession", mode: "immersive-ar", features: ["local", "hit-test"] });
+  log("requestSession reply:", JSON.stringify(session));
+
+  await new Promise(r => setTimeout(r, 1500));  // warm-up
+  const f0 = frames, t0 = performance.now();
+  await new Promise(r => setTimeout(r, 2000));
+  const rate = (frames - f0) / ((performance.now() - t0) / 1000);
+  log("onFrame calls/sec:", rate.toFixed(1));
+  log("first frame args:", JSON.stringify(argsSeen));
+  const p0 = first.transform.slice(12, 15).map(v => v.toFixed(3)), p1 = last.transform.slice(12, 15).map(v => v.toFixed(3));
+  log("camera position first:", p0.join(","), "latest:", p1.join(","), "tracking:", last.tracking);
+  log("ARKit frame dt (ms) between first and latest:", (last.t - first.t).toFixed(0));
+
+  // Ray straight ahead from the camera (-Z in camera space).
+  const m = last.transform, origin = [m[12], m[13], m[14]], dir = [-m[8], -m[9], -m[10]];
+  const h0 = performance.now();
+  const hit = await native({ type: "hitTest", origin, direction: dir });
+  log("hitTest round trip ms:", (performance.now() - h0).toFixed(1), "hits:", hit.hits.length, hit.hits[0] ? "type " + hit.hits[0].type + " at " + hit.hits[0].pose.slice(12, 15).map(v => v.toFixed(2)).join(",") : "");
+  log("planes received:", planes);
+
+  const bad = await native({ type: "bogus" }).then(() => "resolved", e => "rejected: " + e.message);
+  log("unknown type:", bad);
+  await native({ type: "endSession" });
+  const fEnd = frames; await new Promise(r => setTimeout(r, 500));
+  log("frames after endSession:", frames - fEnd);
+  log("DONE");
+})().catch(e => log("ERROR", e.message));
+</script>
+</body></html>

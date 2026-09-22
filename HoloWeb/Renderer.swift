@@ -90,6 +90,14 @@ class Renderer {
     
     // Flag for viewport size changes
     var viewportSizeDidChange: Bool = false
+
+    /// Interface orientation used for the camera image transform; must match what the web bridge reports.
+    var orientation: UIInterfaceOrientation = .portrait {
+        didSet { if orientation != oldValue { viewportSizeDidChange = true } }
+    }
+
+    /// False in stereo (HoloKit optical see-through): the screen stays black behind the web layer.
+    var drawsCameraImage = true
     
     
     init(session: ARSession, metalDevice device: MTLDevice, renderDestination: RenderDestinationProvider) {
@@ -137,8 +145,9 @@ class Renderer {
                 
                 renderEncoder.label = "MyRenderEncoder"
                 
-                drawCapturedImage(renderEncoder: renderEncoder)
-                drawAnchorGeometry(renderEncoder: renderEncoder)
+                if drawsCameraImage {
+                    drawCapturedImage(renderEncoder: renderEncoder)
+                }
                 
                 // We're done encoding commands
                 renderEncoder.endEncoding()
@@ -362,8 +371,8 @@ class Renderer {
         
         let uniforms = sharedUniformBufferAddress.assumingMemoryBound(to: SharedUniforms.self)
         
-        uniforms.pointee.viewMatrix = frame.camera.viewMatrix(for: .landscapeRight)
-        uniforms.pointee.projectionMatrix = frame.camera.projectionMatrix(for: .landscapeRight, viewportSize: viewportSize, zNear: 0.001, zFar: 1000)
+        uniforms.pointee.viewMatrix = frame.camera.viewMatrix(for: orientation)
+        uniforms.pointee.projectionMatrix = frame.camera.projectionMatrix(for: orientation, viewportSize: viewportSize, zNear: 0.001, zFar: 1000)
 
         // Set up lighting for the scene using the ambient intensity if provided
         var ambientIntensity: Float = 1.0
@@ -436,7 +445,7 @@ class Renderer {
     
     func updateImagePlane(frame: ARFrame) {
         // Update the texture coordinates of our image plane to aspect fill the viewport
-        let displayToCameraTransform = frame.displayTransform(for: .landscapeRight, viewportSize: viewportSize).inverted()
+        let displayToCameraTransform = frame.displayTransform(for: orientation, viewportSize: viewportSize).inverted()
 
         let vertexData = imagePlaneVertexBuffer.contents().assumingMemoryBound(to: Float.self)
         for index in 0...3 {

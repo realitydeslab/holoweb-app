@@ -71,3 +71,13 @@ three.js WebGPU-backend XR path needs only: `globalThis.XRGPUBinding` constructo
 - Canvas configure with usage RENDER_ATTACHMENT|COPY_DST and alphaMode premultiplied: OK. Rendered into layer 0 of a 2-layer texture and copyTextureToTexture into the canvas: OK. -> XRGPUBinding presenter design is confirmed viable on device.
 - WebGL2: works; OVR_multiview2: not exposed (so three.js WebGL XR will not use multiview).
 - UA string reports "iPhone OS 18_7" (WebKit UA freeze), so pages must not sniff the iOS version from UA.
+
+### M3 native bridge (HoloWeb/ARBridge.swift, BridgeMath.swift; test page Web/bridge-check.html)
+- WKJSHandle works on iOS 27: `configuration.defaultWebpagePreferences.allowsJSHandleCreationInPageWorld = true` (also set per navigation) makes `window.webkit.createJSHandle` available in the page world; the handle arrives inside the `ready` message body as a `WKJSHandle` and works as a `callAsyncJavaScript` argument. Transport reported: "jshandle".
+- ready reply on iPhone 15 Pro: model iPhone16,1, nativeBounds 1179x2556, scale 3, dpi 460.
+- Frame rate: ARKit 60.5 fps (video format 60). With one call in flight: 30.0 calls/s, 50% skipped, because one callAsyncJavaScript round trip is ~17-20 ms. With max 2 in flight: 59.9 calls/s, 0 skipped. Decision: maxFramesInFlight = 2.
+- hitTest round trip: 6-8 ms. Returned 0 hits in the unattended run (phone lying still, ray not aimed at a surface); needs a manual run aimed at the floor.
+- Planes: 0 during the 4 s unattended run (no movement). Needs a manual run.
+- Unknown message type rejects the JS promise with the error string; no frames arrive after endSession.
+- Stereo orientation: HoloKit's Unity LandscapeLeft equals UIInterfaceOrientation.landscapeRight (home side on the right); setMode(.stereo) requests `.landscapeRight`.
+- Renderer now follows the interface orientation (was hardcoded .landscapeRight, wrong in portrait), skips the camera image in stereo, and no longer draws the sample's debug anchor cubes.

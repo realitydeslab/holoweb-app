@@ -23,14 +23,15 @@ Minimum OS: iOS 27.0. Transport uses `WKJSHandle` (iOS 27) so native calls into 
 | `log` | `{ level, message }` | `{ ok }` |
 
 ## native -> JS calls (via `callAsyncJavaScript(functionBody, arguments:, in: nil, in: .page)` with the stored handle passed as `bridge`)
-`bridge.onFrame(t, mode, transform, view, proj, light, tracking)` once per ARFrame (60 Hz, coalesced: skip if previous call has not returned).
+`bridge.onFrame(t, mode, transform, view, proj, light, tracking, orientation)` once per ARFrame (60 Hz, coalesced: skip if previous call has not returned).
 - `t`: ARFrame.timestamp in ms (Double)
 - `mode`: "mono" | "stereo"
-- `transform`: number[16] column-major `ARCamera.transform` (camera pose in ARKit world, Y-up, metres)
+- `transform`: number[16] column-major display-oriented camera pose = `inverse(view)` (NOT raw `ARCamera.transform`, which is in sensor/landscape-right orientation). Use it directly as the WebXR viewer pose in `local` space.
 - `view`: number[16] column-major `ARCamera.viewMatrix(for: orientation)` where orientation = current interface orientation (mono) or `.landscapeLeft` (stereo)
 - `proj`: number[16] column-major `ARCamera.projectionMatrix(for: orientation, viewportSize: webViewSizePx, zNear: 0.01, zFar: 1000)`. JS rewrites entries [10] and [14] from the session's depthNear/depthFar.
 - `light`: `{ ambientIntensity, ambientColorTemperature }` (lux, kelvin) or null
 - `tracking`: "normal" | "limited" | "notAvailable"
+- `orientation`: "portrait" | "portraitUpsideDown" | "landscapeLeft" | "landscapeRight" (interface orientation used for view/proj)
 
 `bridge.onPlanes(planes)` at most 10 Hz when the plane set changed: `[{ id, transform: number[16], extent: [w, h], orientation: "horizontal" | "vertical" }]`.
 `bridge.onSessionEnded(reason)` when native ends the session (interruption, background).

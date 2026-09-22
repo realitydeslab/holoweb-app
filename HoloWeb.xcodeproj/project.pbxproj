@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		96B0000000000000000000D2 /* BridgeMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96B0000000000000000000D1 /* BridgeMath.swift */; };
+		96B0000000000000000000D3 /* BridgeMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96B0000000000000000000D1 /* BridgeMath.swift */; };
+		96B0000000000000000000C2 /* ARBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96B0000000000000000000C1 /* ARBridge.swift */; };
+		96B0000000000000000000C3 /* ARBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96B0000000000000000000C1 /* ARBridge.swift */; };
 		96B0000000000000000000B2 /* Web in Resources */ = {isa = PBXBuildFile; fileRef = 96B0000000000000000000B1 /* Web */; };
 		96B0000000000000000000B3 /* Web in Resources */ = {isa = PBXBuildFile; fileRef = 96B0000000000000000000B1 /* Web */; };
 		96B0000000000000000000A2 /* HoloWebLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96B0000000000000000000A1 /* HoloWebLink.swift */; };
@@ -59,6 +63,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		96B0000000000000000000D1 /* BridgeMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeMath.swift; sourceTree = "<group>"; };
+		96B0000000000000000000C1 /* ARBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARBridge.swift; sourceTree = "<group>"; };
 		96B0000000000000000000B1 /* Web */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Web; sourceTree = "<group>"; };
 		96B0000000000000000000A1 /* HoloWebLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoloWebLink.swift; sourceTree = "<group>"; };
 		4B1E355A2A7A21A9003EBC46 /* HoloWeb.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HoloWeb.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -126,6 +132,8 @@
 				96ACF3902E023D7C006DF723 /* MetalViewRepresentable.swift */,
 				96A613632E06428400249893 /* WebViewRepresentable.swift */,
 				4B1E355D2A7A21A9003EBC46 /* HoloWebState.swift */,
+				96B0000000000000000000D1 /* BridgeMath.swift */,
+				96B0000000000000000000C1 /* ARBridge.swift */,
 				96B0000000000000000000A1 /* HoloWebLink.swift */,
 				96ACF3962E025059006DF723 /* Renderer.swift */,
 				4B1E355F2A7A21A9003EBC46 /* ContentView.swift */,
@@ -259,6 +267,8 @@
 				4B1E35602A7A21A9003EBC46 /* ContentView.swift in Sources */,
 				96ACF3C22E026876006DF723 /* HoloWebApp.swift in Sources */,
 				4B1E355E2A7A21A9003EBC46 /* HoloWebState.swift in Sources */,
+				96B0000000000000000000D2 /* BridgeMath.swift in Sources */,
+				96B0000000000000000000C2 /* ARBridge.swift in Sources */,
 				96B0000000000000000000A2 /* HoloWebLink.swift in Sources */,
 				96A613642E06428400249893 /* WebViewRepresentable.swift in Sources */,
 				96ACF3922E023D7C006DF723 /* MetalViewRepresentable.swift in Sources */,
@@ -274,6 +284,8 @@
 				9602D0912CE97F2800F2820D /* ContentView.swift in Sources */,
 				9602D0902CE974A200F2820D /* HoloWebClipApp.swift in Sources */,
 				966427E42E033F9300B9EEA8 /* HoloWebState.swift in Sources */,
+				96B0000000000000000000D3 /* BridgeMath.swift in Sources */,
+				96B0000000000000000000C3 /* ARBridge.swift in Sources */,
 				96B0000000000000000000A3 /* HoloWebLink.swift in Sources */,
 				96A613652E06428400249893 /* WebViewRepresentable.swift in Sources */,
 				96ACF3942E023D7C006DF723 /* MetalViewRepresentable.swift in Sources */,

@@ -28,6 +28,7 @@ final class HoloWebState: NSObject {
 
     let session = ARSession()
     let webView: WKWebView
+    private(set) var bridge: ARBridge?
 
     private nonisolated static let logHandlerName = "holowebLog"
 
@@ -36,6 +37,7 @@ final class HoloWebState: NSObject {
         configuration.allowsInlineMediaPlayback = true
         configuration.allowsPictureInPictureMediaPlayback = false
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        configuration.defaultWebpagePreferences.allowsJSHandleCreationInPageWorld = true
 
         // Forward console output to Xcode so page-side failures are visible.
         let consoleForwarder = WKUserScript(
@@ -44,6 +46,14 @@ final class HoloWebState: NSObject {
             forMainFrameOnly: true
         )
         configuration.userContentController.addUserScript(consoleForwarder)
+
+        // The WebXR polyfill must run before any page script so navigator.xr exists on first use.
+        if ProcessInfo.processInfo.environment["HOLOWEB_NO_POLYFILL"] == nil,
+           let polyfillURL = Bundle.main.url(forResource: "holoweb-polyfill", withExtension: "js", subdirectory: "Web"),
+           let polyfill = try? String(contentsOf: polyfillURL, encoding: .utf8) {
+            configuration.userContentController.addUserScript(
+                WKUserScript(source: polyfill, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        }
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.isOpaque = false
@@ -56,6 +66,18 @@ final class HoloWebState: NSObject {
 
         super.init()
         configuration.userContentController.add(self, name: Self.logHandlerName)
+        bridge = ARBridge(state: self, session: session, webView: webView)
+    }
+
+    /// Switches mono/stereo. Stereo locks landscape with the home side on the right,
+    /// which is how the phone sits in HoloKit X (Unity's LandscapeLeft).
+    func setMode(_ newMode: RenderMode) {
+        mode = newMode
+        guard let scene = webView.window?.windowScene else { return }
+        let mask: UIInterfaceOrientationMask = newMode == .stereo ? .landscapeRight : .allButUpsideDown
+        scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { error in
+            print("[state] orientation request failed: \(error.localizedDescription)")
+        }
     }
 
     func load(_ url: URL) {

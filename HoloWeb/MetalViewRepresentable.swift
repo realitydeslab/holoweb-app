@@ -25,7 +25,7 @@ struct MetalViewRepresentable: UIViewRepresentable {
      }
     
      func updateUIView(_ uiView: MTKView, context: Context) {
-         // Update if needed
+         context.coordinator.renderer?.drawsCameraImage = state.mode == .mono
      }
     
      func makeCoordinator() -> Coordinator {
@@ -45,6 +45,9 @@ struct MetalViewRepresentable: UIViewRepresentable {
          }
          
          func draw(in view: MTKView) {
+             if let orientation = view.window?.windowScene?.effectiveGeometry.interfaceOrientation {
+                 renderer?.orientation = orientation
+             }
              renderer?.update()
          }
         
