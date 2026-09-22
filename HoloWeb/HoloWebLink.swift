@@ -13,7 +13,7 @@ enum HoloWebLink {
               let value = components.queryItems?.first(where: { $0.name == queryKey })?.value,
               let target = URL(string: value),
               let scheme = target.scheme?.lowercased(),
-              scheme == "https" || scheme == "http" else {
+              scheme == "https" else {
             return nil
         }
         return target

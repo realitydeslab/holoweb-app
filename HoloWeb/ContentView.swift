@@ -16,7 +16,6 @@ struct ContentView: View {
         }
         .ignoresSafeArea()
         .statusBarHidden()
-        .onAppear { state.startARSession() }
         .onDisappear { state.pauseARSession() }
     }
 

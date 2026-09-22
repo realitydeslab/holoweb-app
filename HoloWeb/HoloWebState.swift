@@ -63,11 +63,13 @@ final class HoloWebState: NSObject {
         webView.scrollView.backgroundColor = .clear
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
+        #if DEBUG
         webView.isInspectable = true
+        #endif
         self.webView = webView
 
         super.init()
-        configuration.userContentController.add(self, name: Self.logHandlerName)
+        configuration.userContentController.add(WeakMessageHandler(self), name: Self.logHandlerName)
         bridge = ARBridge(state: self, session: session, webView: webView)
     }
 
@@ -107,6 +109,11 @@ final class HoloWebState: NSObject {
         configuration.environmentTexturing = .automatic
         session.run(configuration)
         isARRunning = true
+    }
+
+    /// Called when ARKit reports a fatal error, so the next requestSession runs it again.
+    func markARStopped() {
+        isARRunning = false
     }
 
     func pauseARSession() {

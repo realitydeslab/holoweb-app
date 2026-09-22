@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		96B000000000000000000102 /* ARBridge+Frames.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96B000000000000000000101 /* ARBridge+Frames.swift */; };
+		96B000000000000000000103 /* ARBridge+Frames.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96B000000000000000000101 /* ARBridge+Frames.swift */; };
 		96B0000000000000000000F2 /* BundledPageSchemeHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96B0000000000000000000F1 /* BundledPageSchemeHandler.swift */; };
 		96B0000000000000000000F3 /* BundledPageSchemeHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96B0000000000000000000F1 /* BundledPageSchemeHandler.swift */; };
 		96B0000000000000000000D2 /* BridgeMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96B0000000000000000000D1 /* BridgeMath.swift */; };
@@ -65,6 +67,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		96B000000000000000000101 /* ARBridge+Frames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ARBridge+Frames.swift"; sourceTree = "<group>"; };
 		96B0000000000000000000F1 /* BundledPageSchemeHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BundledPageSchemeHandler.swift; sourceTree = "<group>"; };
 		96B0000000000000000000D1 /* BridgeMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeMath.swift; sourceTree = "<group>"; };
 		96B0000000000000000000C1 /* ARBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARBridge.swift; sourceTree = "<group>"; };
@@ -136,6 +139,7 @@
 				96ACF3902E023D7C006DF723 /* MetalViewRepresentable.swift */,
 				96A613632E06428400249893 /* WebViewRepresentable.swift */,
 				4B1E355D2A7A21A9003EBC46 /* HoloWebState.swift */,
+				96B000000000000000000101 /* ARBridge+Frames.swift */,
 				96B0000000000000000000F1 /* BundledPageSchemeHandler.swift */,
 				96B0000000000000000000D1 /* BridgeMath.swift */,
 				96B0000000000000000000C1 /* ARBridge.swift */,
@@ -273,6 +277,7 @@
 				4B1E35602A7A21A9003EBC46 /* ContentView.swift in Sources */,
 				96ACF3C22E026876006DF723 /* HoloWebApp.swift in Sources */,
 				4B1E355E2A7A21A9003EBC46 /* HoloWebState.swift in Sources */,
+				96B000000000000000000102 /* ARBridge+Frames.swift in Sources */,
 				96B0000000000000000000F2 /* BundledPageSchemeHandler.swift in Sources */,
 				96B0000000000000000000D2 /* BridgeMath.swift in Sources */,
 				96B0000000000000000000C2 /* ARBridge.swift in Sources */,
@@ -291,6 +296,7 @@
 				9602D0912CE97F2800F2820D /* ContentView.swift in Sources */,
 				9602D0902CE974A200F2820D /* HoloWebClipApp.swift in Sources */,
 				966427E42E033F9300B9EEA8 /* HoloWebState.swift in Sources */,
+				96B000000000000000000103 /* ARBridge+Frames.swift in Sources */,
 				96B0000000000000000000F3 /* BundledPageSchemeHandler.swift in Sources */,
 				96B0000000000000000000D3 /* BridgeMath.swift in Sources */,
 				96B0000000000000000000C3 /* ARBridge.swift in Sources */,
