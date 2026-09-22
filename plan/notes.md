@@ -479,3 +479,37 @@ Needs a person:
 - Hold a hand 30–60 cm in front of the rear camera: hands-check.html shape, hand rate and plausible size. Raise only the right hand and check that handedness reads "right".
 
 Device contention: another agent ran regression.py on the same phone 19:59–20:09. My concurrent launches died with signal 9 or CoreDevice error 4000. Only one agent should use the phone at a time.
+
+## Polyfill execution log (P0/P1 gaps G1–G13, samples e2e, G10 hand gestures)
+
+Gaps closed in polyfill/ (details in plan/samples_requirements.md):
+- G1: `renderState.layers` is undefined until a page sets layers (IWER patch). r152 used to take the layers path and draw nothing; fixture test/fixtures three-r152.html now passes.
+- G2/G3: inline sessions keep their canvas in place. SessionSlots parks the inline session while an immersive one runs and makes it active again afterwards; exit-button sample passes.
+- G4: `XRHitTestResult.createAnchor` still works after its frame ends; persistent anchor handles are rejected.
+- G6: `beforexrselect` is honoured on dom-overlay touches.
+- G7: immersive-vr is supported as an opaque session (product decision); requestSession is native for every non-inline mode.
+- G11: `onVisibility` maps to visibilityState and visibilitychange. Input ends without select, and frames pause while hidden.
+- G9: `mesh-detection` via onMeshes (base64 geometry, stable XRMesh objects, transform-only updates).
+- G13: `supportedFeatures` come from the ready reply's capabilities; mesh-detection and hand-tracking only with LiDAR.
+- G12: an XRGPUBinding depthStencilTexture is allocated when requested. Descriptor-cache priming applies only when `__THREE__` is set. Negative control: with allocation disabled, the 3 GPU warnings return.
+- G10 (JS):
+  - onHands accepts `{t, hands}` and the legacy bare array.
+  - Per-joint One Euro filter on native t (minCutoff 1.5 Hz, beta 2; 0.7 Hz where the depthValid bit is clear). Filters reset when a hand reappears.
+  - Gestures use unfiltered joints: hysteresis handles the noise without filter lag. Poses use the filtered joints.
+  - Grab (curl ratio < 1.35, release > 1.55) fires squeezestart / squeeze / squeezeend.
+  - A grab suppresses the pinch. An active pinch ends with selectend only, before squeezestart.
+  - Grip sits at the palm centre (wrist + 4 MCPs). Pinch thresholds are scaled by hand size; radii follow the spec table.
+
+Flake root cause: the gpu-priming test had no fake window.webkit, so the mock native pushed 60 Hz frames into the test. Fixed with a webkit stub.
+
+Verification (2026-09-22):
+- npm test: 13 files, 99 tests pass (new test/hand-gestures.test.ts: One Euro step and jitter, squeeze hysteresis, event order, pinch cancel, smoothing, palm grip, legacy array form).
+- npm run test:e2e: 29/29, including all 10 immersive-web samples and three-ar-hands with the new onHands format.
+- Build: 176.5 KB (55.3 KB gzip).
+
+Tune on device: HAND_FILTER in src/one-euro.ts and SQUEEZE_ON/OFF in src/hands.ts.
+
+### Image tracking on device (2026-09-22, iPhone 15 Pro facing the laptop's built-in screen)
+- Fixture: holoweb-marker.png shown full-screen in Safari on the built-in display at 750 pt ≈ 15.0 cm (panel 30.2 cm / 1512 pt). Scratchpad `show.sh marker|hand` switches it; Safari must be in its own full-screen Space, otherwise any Chrome activation raises a leftover Chrome window over it (that happened twice and was the cause of the first "not tracked" runs).
+- image-check.html: scores [trackable, untrackable, trackable]; 279 tracked results in ~20 s, 0 malformed; measuredWidthInMeters 0.150 (expected 0.15); axes orthonormal; +Z · (to camera) 0.79; +Y · worldUp 0.86 (screen tilted back). Confirms the anchor.transform * Rx(-90°) imageSpace convention.
+- Device screenshots: `xcrun devicectl device capture screenshot --device <udid> --destination <png>`.
