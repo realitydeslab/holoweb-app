@@ -674,3 +674,4 @@ Device (show.sh hands2, hands-check.html):
   - Negative control, a bundle with the old defaults: "Direction's `w` component must be set to 0.0f!", then model-viewer's null-property page errors.
 - Flake: Needle (live) twice got no image results within 15 s, only in full-suite runs; run alone it streams about 60 queries/s in both engines. The live cases now retry the AR entry once if no session starts within 8 s, and a failure prints stats, session, features and visibility.
 - Verification: npm test 111/111 (17 files); e2e 40/40 (Chromium + WebKit image cases); e2e WebKit full 37/37.
+- Recheck after 9016028 (XRRay per Chromium): model-viewer 4/4 (enters AR, 1560 frames, 0 skipped, no page errors); Babylon measure tape 4/4 on retry (2038 frames, 2 skipped) — earlier failure was the playground's own load timeout.
