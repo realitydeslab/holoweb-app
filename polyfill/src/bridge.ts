@@ -30,6 +30,7 @@ import {
 import { nativeFramebufferSize, devicePixelRatioOrOne } from './device.js';
 import type { NativeHandsUpdate } from './hand-input.js';
 import type { NativeMeshUpdate } from './meshes.js';
+import { mergeScores, type NativeImageResult, type NativeTrackedImage, type XRImageTrackingScore } from './image-tracking.js';
 import type { NativePlaneData, PlaneEnvironment } from './hittest.js';
 import { PosePredictor } from './prediction.js';
 import type { NativeEnvironment } from './reflection.js';
@@ -61,6 +62,8 @@ export class HoloWebBridge {
   visibilityHandler: ((state: string) => void) | null = null;
   /** Receives onMeshes updates (MeshTracking). */
   meshesHandler: ((update: NativeMeshUpdate) => void) | null = null;
+  /** Receives onImages results (ImageTracking). */
+  imagesHandler: ((results: NativeImageResult[]) => void) | null = null;
   /** Capabilities from the ready reply (undefined: native did not report them). */
   capabilities: Capabilities | undefined;
   /** Called when the ready reply reports capabilities (supported features follow them). */
@@ -97,6 +100,7 @@ export class HoloWebBridge {
       onEnvironment: (environment) => this.environmentHandler?.(environment),
       onVisibility: (state) => this.visibilityHandler?.(state),
       onMeshes: (update) => this.meshesHandler?.(update),
+      onImages: (results) => this.imagesHandler?.(Array.isArray(results) ? results : []),
       onSessionEnded: (reason) => this.onNativeSessionEnded?.(reason),
     };
   }
@@ -276,6 +280,19 @@ export class HoloWebBridge {
     };
     if (result.mode) this.setLocalMode(result.mode);
     return result;
+  }
+
+  /** Post the tracked images (before requestSession); one score per image, local failures untrackable. */
+  async setTrackedImages(images: readonly (NativeTrackedImage | null)[]): Promise<XRImageTrackingScore[]> {
+    const sent = images.filter((x): x is NativeTrackedImage => x !== null);
+    if (!sent.length) return mergeScores(images, []);
+    try {
+      const reply = await this.transport.post({ type: 'setTrackedImages', images: sent });
+      return mergeScores(images, isRecord(reply) ? reply.scores : undefined);
+    } catch (err) {
+      console.warn('HoloWeb setTrackedImages', err);
+      return mergeScores(images, []);
+    }
   }
 
   /** Tell native which ARFrame the XR frame just drawn used (fire and forget). */

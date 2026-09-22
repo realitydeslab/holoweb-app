@@ -3,6 +3,7 @@ import type { NativeAnchorData } from './anchors.js';
 import { devicePixelRatioOrOne } from './device.js';
 import type { NativeHandsUpdate } from './hand-input.js';
 import type { NativeMeshUpdate } from './meshes.js';
+import type { NativeImageResult } from './image-tracking.js';
 import type { NativePlaneData } from './hittest.js';
 import type { NativeEnvironment } from './reflection.js';
 import type { PixelRect } from './stereo.js';
@@ -72,6 +73,7 @@ export interface NativeCallbacks {
   onEnvironment(environment: NativeEnvironment): void;
   onVisibility(state: 'visible' | 'visible-blurred' | 'hidden'): void;
   onMeshes(update: NativeMeshUpdate): void;
+  onImages(results: NativeImageResult[]): void;
   onSessionEnded(reason?: string): void;
 }
 

@@ -52,6 +52,9 @@ export function createMockTransport(options: MockOptions = {}): Transport {
   let nextAnchor = 1;
   // Like native, hand tracking (Vision) runs only for sessions that asked for it.
   let handsOn = false;
+  // Image tracking: widths of the trackable images (setTrackedImages); image 0 is "seen" 0.5 m ahead.
+  let trackedWidths: (number | null)[] = [];
+  let imageAnchor: number[] | null = null;
 
   const pushFrame = () => {
     const cb = target();
@@ -76,6 +79,11 @@ export function createMockTransport(options: MockOptions = {}): Transport {
       Date.now(),
     );
     // Vision runs at ~30 Hz on device
+    if (imageAnchor && trackedWidths[0]) {
+      // tracked for a second, then emulated (out of view) for a second, like a phone panning away
+      const tracked = Math.floor(t) % 2 === 0;
+      cb.onImages([{ index: 0, transform: imageAnchor, tracked, measuredWidthInMeters: trackedWidths[0] }]);
+    }
     if (handsOn && frameIndex % 2 === 0) cb.onHands({ t: performance.now(), hands: [mockHand(pose, performance.now() - start)] });
   };
 
@@ -103,6 +111,8 @@ export function createMockTransport(options: MockOptions = {}): Transport {
       stop();
       const features = Array.isArray(msg.features) ? (msg.features as string[]) : [];
       handsOn = features.includes('hand-tracking');
+      const ahead = mat4.translate(mat4.create(), mockCameraPose((performance.now() - start) / 1000), [0, 0, -0.5]);
+      imageAnchor = features.includes('image-tracking') ? Array.from(ahead) : null;
       if (features.includes('mesh-detection')) {
         setTimeout(() => target()?.onMeshes(mockMeshes(false, 0) as never), 100);
         setTimeout(() => timer !== null && target()?.onMeshes(mockMeshes(true, performance.now()) as never), 1500);
@@ -120,12 +130,25 @@ export function createMockTransport(options: MockOptions = {}): Transport {
     endSession: () => {
       stop();
       handsOn = false;
+      imageAnchor = null;
       anchors.clear();
       return { ok: true };
     },
     setMode: (msg) => {
       mode = msg.mode === 'stereo' ? 'stereo' : 'mono';
       return { ok: true };
+    },
+    // ARKit rejects images without enough detail; the mock calls 1x1 images untrackable
+    setTrackedImages: (msg) => {
+      const images = Array.isArray(msg.images) ? (msg.images as { index: number; width: number; height: number; widthInMeters: number }[]) : [];
+      trackedWidths = [];
+      // scores follow the order of `images`; results use each image's `index`
+      const scores = images.map((img) => {
+        const ok = img.width * img.height > 1;
+        trackedWidths[img.index] = ok ? img.widthInMeters : null;
+        return ok ? 'trackable' : 'untrackable';
+      });
+      return { scores };
     },
     hitTest: () => ({ hits: [] }),
     rendered: () => null,

@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <title>HoloWeb AR image tracking</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+      #info { position: absolute; top: 8px; left: 0; right: 0; text-align: center; font: 13px system-ui; color: #fff; text-shadow: 0 0 3px #000; pointer-events: none; }
+      #state { display: block; margin-top: 4px; font: 600 15px ui-monospace, monospace; }
+      #marker { position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%); width: 96px; border: 2px solid #fff; }
+      .immersive #marker { display: none; }
+    </style>
+    <!-- In the app this is injected at document start; loading it first here does the same. -->
+    <script src="../holoweb-polyfill.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.webgpu.js",
+          "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.webgpu.js",
+          "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.tsl.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="info">HoloWeb &middot; WebXR image tracking &middot; point the camera at the HoloWeb marker (15 cm wide)<span id="state">loading marker&hellip;</span></div>
+    <img id="marker" src="assets/holoweb-marker.png" alt="HoloWeb marker" />
+    <script type="module">
+      // WebXR Image Tracking (immersive-web/image-tracking explainer): the marker is passed as
+      // trackedImages; each frame draws an axis gizmo and a frame outline in imageSpace (+X right,
+      // +Y image top, +Z toward the viewer), bright while 'tracked', dim while 'emulated'.
+      // ?autostart enters AR without a tap, ?stats logs the tracking state every 2 s, ?backend=webgl.
+      import * as THREE from 'three/webgpu';
+      import { ARButton } from 'three/addons/webxr/ARButton.js';
+
+      const MARKER_WIDTH_M = 0.15;
+      const params = new URLSearchParams(location.search);
+      const status = (window.__imageStatus = { backend: '', xrFrames: 0, scores: null, results: [], trackedFrames: 0, emulatedFrames: 0, errors: [] });
+      addEventListener('error', (e) => status.errors.push(String(e.message)));
+      addEventListener('unhandledrejection', (e) => status.errors.push(String(e.reason)));
+      const stateText = document.getElementById('state');
+
+      const renderer = new THREE.WebGPURenderer({ antialias: true, alpha: true, forceWebGL: params.get('backend') === 'webgl' });
+      renderer.setPixelRatio(devicePixelRatio);
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.xr.enabled = true;
+      document.body.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.01, 20);
+
+      // gizmo in imageSpace: axes (red X, green Y, blue Z) and the image outline
+      const marker = new THREE.Group();
+      marker.matrixAutoUpdate = false;
+      marker.visible = false;
+      marker.add(new THREE.AxesHelper(0.08));
+      const half = MARKER_WIDTH_M / 2;
+      // closed polyline (WebGPURenderer has no LineLoop)
+      const outline = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([[-half, -half], [half, -half], [half, half], [-half, half], [-half, -half]].map(([x, y]) => new THREE.Vector3(x, y, 0))),
+        new THREE.LineBasicMaterial({ color: 0x00e5ff }),
+      );
+      marker.add(outline);
+      scene.add(marker);
+
+      const image = document.getElementById('marker');
+      await image.decode();
+      const bitmap = await createImageBitmap(image);
+      const sessionInit = {
+        requiredFeatures: ['image-tracking'],
+        optionalFeatures: ['dom-overlay', 'webgpu'],
+        domOverlay: { root: document.body },
+        trackedImages: [{ image: bitmap, widthInMeters: MARKER_WIDTH_M }],
+      };
+      stateText.textContent = 'ready';
+
+      renderer.xr.addEventListener('sessionstart', async () => {
+        const session = renderer.xr.getSession();
+        document.body.classList.add('immersive');
+        status.backend = renderer.backend.isWebGPUBackend ? 'webgpu' : 'webgl';
+        status.scores = [...(await session.getTrackedImageScores())];
+        stateText.textContent = `marker: ${status.scores[0]}`;
+      });
+      renderer.xr.addEventListener('sessionend', () => {
+        document.body.classList.remove('immersive');
+        marker.visible = false;
+      });
+
+      renderer.setAnimationLoop((time, frame) => {
+        if (frame) {
+          status.xrFrames++;
+          const results = frame.getImageTrackingResults();
+          status.results = results.map((r) => ({ index: r.index, state: r.trackingState, width: +r.measuredWidthInMeters.toFixed(3) }));
+          const result = results.find((r) => r.index === 0);
+          const pose = result && frame.getPose(result.imageSpace, renderer.xr.getReferenceSpace());
+          marker.visible = Boolean(pose);
+          if (pose) {
+            marker.matrix.fromArray(pose.transform.matrix);
+            marker.matrixWorldNeedsUpdate = true;
+            const tracked = result.trackingState === 'tracked';
+            outline.material.color.set(tracked ? 0x00e5ff : 0x446677);
+            status[tracked ? 'trackedFrames' : 'emulatedFrames']++;
+          }
+          if (status.scores) {
+            stateText.textContent = `marker: ${status.scores[0]} · ${result ? result.trackingState : 'not seen yet'}` +
+              (result?.measuredWidthInMeters ? ` · ${(result.measuredWidthInMeters * 100).toFixed(1)} cm` : '');
+          }
+        }
+        renderer.render(scene, camera);
+      });
+
+      document.body.appendChild(ARButton.createButton(renderer, sessionInit));
+      if (params.has('autostart')) {
+        (async () => {
+          const session = await navigator.xr.requestSession('immersive-ar', sessionInit);
+          renderer.xr.setReferenceSpaceType('local');
+          await renderer.xr.setSession(session);
+        })().catch((e) => console.error('autostart failed: ' + e.message));
+      }
+      if (params.has('stats') || params.has('autostart')) {
+        setInterval(() => console.log('[image-tracking] ' + JSON.stringify({ scores: status.scores, results: status.results, xrFrames: status.xrFrames, errors: status.errors.slice(-3) })), 2000);
+      }
+
+      addEventListener('resize', () => {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+      });
+    </script>
+  </body>
+</html>

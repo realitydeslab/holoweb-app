@@ -18,6 +18,8 @@ export const HOLOKIT_FEATURES: WebXRFeature[] = [
   'webgpu',
   'hand-tracking',
   'plane-detection',
+  // not in IWER's WebXRFeature union; IWER only compares strings
+  'image-tracking' as WebXRFeature,
 ];
 
 /**

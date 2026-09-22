@@ -13,4 +13,7 @@ cp examples/*.js "$WEB/examples/"
 for f in examples/*.html; do
   sed 's#\.\./dist/holoweb-polyfill\.js#../holoweb-polyfill.js#' "$f" > "$WEB/examples/$(basename "$f")"
 done
-ls -l "$WEB/holoweb-polyfill.js" "$WEB/examples"
+# example assets (image-tracking marker, 0.15 m wide)
+mkdir -p "$WEB/examples/assets"
+cp examples/assets/* "$WEB/examples/assets/"
+ls -l "$WEB/holoweb-polyfill.js" "$WEB/examples" "$WEB/examples/assets"

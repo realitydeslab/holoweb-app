@@ -19,11 +19,12 @@ import type { XRSessionInit, XRSessionMode } from 'iwer/lib/session/XRSession.js
 import type { HoloWebBridge } from './bridge.js';
 import { addFrameEndListener } from './device.js';
 import { FloorTracker } from './floor.js';
+import { SNAPSHOTS, type ImageTracking, type SnapshotOptions } from './image-tracking.js';
 import type { ScreenInput } from './input.js';
 
 const OVERLAY_Z_INDEX = '1000';
 
-type SessionOptions = XRSessionInit & { domOverlay?: { root?: Element } };
+type SessionOptions = XRSessionInit & { domOverlay?: { root?: Element } } & Pick<SnapshotOptions, typeof SNAPSHOTS>;
 
 function patchReferenceSpaces(session: XRSession, floor: FloorTracker): void {
   const original = session.requestReferenceSpace.bind(session);
@@ -184,6 +185,7 @@ export function installSessionHooks(
   device: XRDevice,
   bridge: HoloWebBridge,
   input: ScreenInput,
+  images: ImageTracking,
   /** Per-session native state to drop when an immersive session ends (anchors, hands, planes, maps). */
   onSessionEnd: () => void,
 ): void {
@@ -192,6 +194,8 @@ export function installSessionHooks(
   const iwerRequestSession = xr.requestSession.bind(xr);
 
   xr.requestSession = async (mode: XRSessionMode, options: SessionOptions = {}): Promise<XRSession> => {
+    // image-tracking: images were snapshotted in the page's call (installImageSnapshot)
+    const snapshots = options[SNAPSHOTS] ?? [];
     const session = await iwerRequestSession(mode, options);
     const floor = new FloorTracker(bridge.environment.planeData);
     patchReferenceSpaces(session, floor);
@@ -199,6 +203,12 @@ export function installSessionHooks(
 
     let endedByNative = false;
     try {
+      if ((session.enabledFeatures as readonly string[]).includes('image-tracking')) {
+        // native needs the detection images before it configures the ARSession
+        const scores = bridge.setTrackedImages(snapshots);
+        images.setScores(session, scores);
+        await scores;
+      }
       const reply = await bridge.requestNativeSession(mode, [...session.enabledFeatures]);
       if (!reply.ok) throw new DOMException(reply.error ?? 'Native AR session refused', 'NotSupportedError');
     } catch (err) {

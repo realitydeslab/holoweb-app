@@ -529,3 +529,32 @@ Tune on device: HAND_FILTER in src/one-euro.ts and SQUEEZE_ON/OFF in src/hands.t
   - New case "WebXR globals under WKWebView conditions": no Chromium XR* left, none missing, XRRay checks, navigator.xr is the polyfill's.
   - The e2e server now reads a file before writeHead. A 404 after writeHead(200) had crashed the run.
 - Result: 30/30 e2e with Chromium's WebXR stripped (all 10 samples, three.js r186 fixtures, r111/r152, A-Frame live, iframe, hands, demo). Nothing else depended on Chromium globals. npm test 101/101 (new test/globals.test.ts).
+
+## Polyfill execution log (WebXR image tracking)
+
+Spec: https://github.com/immersive-web/image-tracking/blob/main/explainer.md (IDL checked against the current explainer).
+
+- src/image-tracking.ts:
+  - Feature 'image-tracking' (always offered; ARKit detection images need no LiDAR).
+  - `installImageSnapshot` is the outermost requestSession wrapper. It draws each `trackedImages[i].image` to a canvas (long side <= 1024 px) synchronously in the page's call, because inner hooks await `ready`: the explainer's snapshot-at-call. It then PNG-encodes them.
+  - The session hook posts `setTrackedImages {images:[{index, widthInMeters, width, height, png}]}` before native requestSession.
+  - Scores map back by index. An image that can't be drawn or has widthInMeters <= 0 is 'untrackable' without reaching native.
+  - `session.getTrackedImageScores()` returns a frozen array and rejects with NotSupportedError without the feature.
+  - `frame.getImageTrackingResults()` returns one frozen array per frame, trackable images only.
+    - `imageSpace` is [SameObject] per index. The native transform is used as-is (already in imageSpace convention).
+    - `tracked:false` maps to 'emulated'.
+    - It throws NotSupportedError without the feature and InvalidStateError outside the frame callback.
+  - Global XRImageTrackingResult (added to WEBXR_GLOBALS). Diagnostics: `__holoweb.images.stats {resultQueries, framesWithResults, lastScores}`.
+- Mock native: setTrackedImages scores 1x1 images 'untrackable'. onImages sends image 0 at 0.5 m ahead of the session-start camera, alternating tracked and emulated each second.
+- examples/image-tracking.html (three r186):
+  - Uses examples/assets/holoweb-marker.png at 0.15 m (the lead's file, not regenerated).
+  - dom-overlay text shows the score, the state and the measured width. Axis gizmo plus outline; the outline is a closed Line, since WebGPURenderer has no LineLoop.
+  - `?stats` logs `[image-tracking] {scores, results:[{index,state,width}]}` every 2 s; `?autostart` also works.
+- Scripts/sync-polyfill.sh copies examples/assets/ to HoloWeb/Web/examples/assets/ (lead-approved edit).
+- Tests:
+  - test/image-tracking.test.ts has 5 conformance cases.
+  - scripts/e2e-images.mjs has 3 cases:
+    - The example, plus a fixture session [marker, 1x1]: scores [trackable, untrackable], results only index 0 in both states, one imageSpace object.
+    - PlayCanvas live: the tap enters AR in its same-origin iframe; results are queried every frame.
+    - Needle app URL live, via the needle-menu "Enter AR" in its shadow root: 2 images trackable.
+- Verification (2026-09-22): npm test 106/106 (15 files), e2e 33/33 with Chromium's WebXR stripped, tsc clean, build 181.8 KB (56.9 KB gzip).

@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { runFrameChecks } from './e2e-frames.mjs';
 import { runHandChecks } from './e2e-hands.mjs';
+import { runImageChecks } from './e2e-images.mjs';
 import { runSampleChecks } from './e2e-samples.mjs';
 import { runThreeOfficialChecks } from './e2e-three-official.mjs';
 import { runStaleEyeChecks as staleEyeChecks } from './e2e-stale-eye.mjs';
@@ -16,7 +17,7 @@ import { mimicWKWebView, runGlobalsChecks } from './e2e-wkwebview.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const shotDir = process.env.HOLOWEB_E2E_SHOTS ?? join(root, 'test-results');
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.map': 'application/json' };
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.map': 'application/json', '.png': 'image/png' };
 const CDN = /^https:\/\/cdn\.jsdelivr\.net\/npm\/three@0\.186\.0\/(.*)$/;
 
 const server = createServer(async (req, res) => {
@@ -231,7 +232,7 @@ for (const c of cases) {
   await context.close();
 }
 
-const suites = [runGlobalsChecks, staleEyeChecks, runHandChecks, runThreeOfficialChecks, runFrameChecks, runSampleChecks];
+const suites = [runGlobalsChecks, staleEyeChecks, runHandChecks, runImageChecks, runThreeOfficialChecks, runFrameChecks, runSampleChecks];
 for (const check of process.env.HOLOWEB_E2E_ONLY === 'samples' ? [runSampleChecks] : suites) {
   const r = await check({ browser, base, root, shotDir });
   failures += r.failures;

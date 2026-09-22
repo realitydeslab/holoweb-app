@@ -8,6 +8,7 @@ import { NativeAnchors } from './anchors.js';
 import { HoloWebBridge, type NativeCallbacks } from './bridge.js';
 import { createHoloKitDevice, featuresFor } from './device.js';
 import { HandTracking } from './hand-input.js';
+import { ImageTracking, installImageSnapshot } from './image-tracking.js';
 import { installGPUBinding, needsPrimingView } from './gpu-binding.js';
 import { installWebXRGlobals, missingWebXRGlobals } from './globals.js';
 import { PlaneEnvironment } from './hittest.js';
@@ -39,6 +40,7 @@ export interface HoloWebGlobal extends NativeCallbacks {
   readonly planes: PlaneTracking;
   readonly meshes: MeshTracking;
   readonly reflections: ReflectionMaps;
+  readonly images: ImageTracking;
   /** WebXR interface globals not installed (should be empty; XRGPUBinding needs WebGPU). */
   missingGlobals(): string[];
 }
@@ -71,6 +73,8 @@ export function install(): HoloWebGlobal {
   const planes = new PlaneTracking(device);
   bridge.planeListeners.add((list) => planes.update(list));
   const meshes = new MeshTracking(device);
+  const images = new ImageTracking(device);
+  bridge.imagesHandler = (results) => images.update(results);
   bridge.meshesHandler = (update) => meshes.update(update);
   bridge.onCapabilities = (capabilities) => {
     device[P_DEVICE].supportedFeatures = featuresFor(capabilities);
@@ -78,14 +82,16 @@ export function install(): HoloWebGlobal {
   const reflections = new ReflectionMaps();
   bridge.environmentHandler = (env) => reflections.update(env);
   bridge.visibilityHandler = (state) => applyVisibility(device, state);
-  installSessionHooks(device, bridge, input, () => {
+  installSessionHooks(device, bridge, input, images, () => {
     anchors.clear();
     hands.reset();
     planes.clear();
     meshes.clear();
+    images.clear();
     reflections.clear();
   });
   installFrameHooks(device, bridge);
+  installImageSnapshot(device); // outermost requestSession wrapper
   installLightEstimation(() => bridge.latest?.light);
   installReflectionBinding(reflections);
   installTransientHitTest(environment);
@@ -107,6 +113,7 @@ export function install(): HoloWebGlobal {
     planes,
     meshes,
     reflections,
+    images,
     missingGlobals: () => missingWebXRGlobals(),
   };
   Object.defineProperty(globalThis, '__holoweb', { value: api, configurable: true, writable: false });
