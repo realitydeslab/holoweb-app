@@ -269,8 +269,16 @@ final class HoloWebState: NSObject {
     func startARSession(features: Set<String> = [], detectionImages: Set<ARReferenceImage> = []) {
         guard !isARRunning || !detectionImages.isEmpty else { return }
         let configuration = ARWorldTrackingConfiguration()
-        configuration.planeDetection = [.horizontal, .vertical]
-        configuration.environmentTexturing = .automatic
+        // Only what the page asked for: plane detection and environment probes cost CPU/GPU (heat).
+        configuration.planeDetection = Self.planeDetection(for: features)
+        configuration.environmentTexturing = features.contains("light-estimation") ? .automatic : .none
+        #if DEBUG
+        // A/B for heat measurements: the old always-on configuration.
+        if ProcessInfo.processInfo.environment["HOLOWEB_ARKIT_ALL"] != nil {
+            configuration.planeDetection = [.horizontal, .vertical]
+            configuration.environmentTexturing = .automatic
+        }
+        #endif
         if features.contains("hand-tracking"), ARWorldTrackingConfiguration.supportsFrameSemantics(.smoothedSceneDepth) {
             configuration.frameSemantics.insert(.smoothedSceneDepth)
         }
@@ -287,9 +295,17 @@ final class HoloWebState: NSObject {
             configuration.automaticImageScaleEstimationEnabled = true
             print("[bridge] image tracking n=\(detectionImages.count)")
         }
-        print("[state] ARKit run planeDetection=\(configuration.planeDetection.rawValue) frameSemantics=\(configuration.frameSemantics.rawValue) sceneReconstruction=\(configuration.sceneReconstruction.rawValue)")
+        print("[state] ARKit run planeDetection=\(configuration.planeDetection.rawValue) frameSemantics=\(configuration.frameSemantics.rawValue) sceneReconstruction=\(configuration.sceneReconstruction.rawValue) environmentTexturing=\(configuration.environmentTexturing.rawValue)")
         session.run(configuration)
         isARRunning = true
+    }
+
+    /// Planes feed plane-detection, hit-test (native raycasts against existing planes and the
+    /// polyfill's plane hit-test, walls included) and local-floor (lowest horizontal plane).
+    nonisolated static func planeDetection(for features: Set<String>) -> ARWorldTrackingConfiguration.PlaneDetection {
+        if features.contains("plane-detection") || features.contains("hit-test") { return [.horizontal, .vertical] }
+        if features.contains("local-floor") { return .horizontal }
+        return []
     }
 
     /// Called when ARKit reports a fatal error, so the next requestSession runs it again.
