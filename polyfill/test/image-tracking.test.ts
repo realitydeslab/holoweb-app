@@ -31,7 +31,14 @@ beforeAll(async () => {
   g.WebGL2RenderingContext = class {};
   // happy-dom has no 2D canvas: count draws, encode the size as the "PNG"
   const proto = HTMLCanvasElement.prototype as unknown as Record<string, unknown>;
-  proto.getContext = function () { return { drawImage: () => { draws++; } }; };
+  proto.getContext = function () {
+    return {
+      fillRect: () => undefined,
+      drawImage: () => { draws++; },
+      // a varied image, so the blank-snapshot check passes
+      getImageData: (_x: number, _y: number, w: number, h: number) => ({ data: Uint8ClampedArray.from({ length: w * h * 4 }, (_, i) => (i % 4 === 3 ? 255 : (i * 31) % 256)) }),
+    };
+  };
   proto.toDataURL = function (this: HTMLCanvasElement) { return `data:image/png;base64,${btoa(`${this.width}x${this.height}`)}`; };
   g.webkit = {
     messageHandlers: {
@@ -59,7 +66,7 @@ beforeEach(() => {
 
 const images = () => [
   { image: bitmap(2048, 1024), widthInMeters: 0.15 }, // scaled to 1024 x 512
-  { image: bitmap(1, 1), widthInMeters: 0.1 }, // native: untrackable
+  { image: bitmap(1, 1), widthInMeters: 0.1 }, // uniform: blank snapshot, untrackable
   { image: bitmap(64, 64), widthInMeters: 0 }, // no width: untrackable, never sent
 ];
 
@@ -73,7 +80,8 @@ describe('image-tracking: session setup', () => {
       const types = posted.map((m) => m.type).filter((t) => t === 'setTrackedImages' || t === 'requestSession');
       expect(types).toEqual(['setTrackedImages', 'requestSession']);
       const sent = posted.find((m) => m.type === 'setTrackedImages')!.images as Record<string, unknown>[];
-      expect(sent.map((i) => [i.index, i.width, i.height, i.widthInMeters])).toEqual([[0, 1024, 512, 0.15], [1, 1, 1, 0.1]]);
+      // the 1x1 image is a single uniform pixel: a blank snapshot, untrackable without reaching native
+      expect(sent.map((i) => [i.index, i.width, i.height, i.widthInMeters])).toEqual([[0, 1024, 512, 0.15]]);
       expect(atob(sent[0].png as string)).toBe('1024x512');
     } finally {
       await session.end();

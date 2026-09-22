@@ -195,7 +195,7 @@ export function installSessionHooks(
 
   xr.requestSession = async (mode: XRSessionMode, options: SessionOptions = {}): Promise<XRSession> => {
     // image-tracking: images were snapshotted in the page's call (installImageSnapshot)
-    const snapshots = options[SNAPSHOTS] ?? [];
+    const snapshots = options[SNAPSHOTS] ?? Promise.resolve([]);
     const session = await iwerRequestSession(mode, options);
     const floor = new FloorTracker(bridge.environment.planeData);
     patchReferenceSpaces(session, floor);
@@ -205,7 +205,7 @@ export function installSessionHooks(
     try {
       if ((session.enabledFeatures as readonly string[]).includes('image-tracking')) {
         // native needs the detection images before it configures the ARSession
-        const scores = bridge.setTrackedImages(snapshots);
+        const scores = snapshots.then((s) => bridge.setTrackedImages(s));
         images.setScores(session, scores);
         await scores;
       }

@@ -675,3 +675,17 @@ Device (show.sh hands2, hands-check.html):
 - Flake: Needle (live) twice got no image results within 15 s, only in full-suite runs; run alone it streams about 60 queries/s in both engines. The live cases now retry the AR entry once if no session starts within 8 s, and a failure prints stats, session, features and visibility.
 - Verification: npm test 111/111 (17 files); e2e 40/40 (Chromium + WebKit image cases); e2e WebKit full 37/37.
 - Recheck after 9016028 (XRRay per Chromium): model-viewer 4/4 (enters AR, 1560 frames, 0 skipped, no page errors); Babylon measure tape 4/4 on retry (2038 frames, 2 skipped) — earlier failure was the playground's own load timeout.
+
+## Polyfill execution log (blank image snapshot on device)
+
+- Root cause, from native's PNG dump: in 4 of 6 device launches the snapshot PNG was 1024x1024 with every pixel RGBA 0,0,0,0 (dump3.log.png, 18478 bytes), and ARKit rejected it with "Invalid reference image". toDataURL returned a valid PNG, so the "data:," fallback never triggered. This fits WKWebView's GPU-accelerated canvas intermittently reading back nothing after drawImage(ImageBitmap).
+- Fix (src/image-snapshot.ts):
+  - `getContext('2d', { willReadFrequently: true })`, a CPU-backed canvas.
+  - Opaque white fill under the image.
+  - `isBlank`: a 32x32 sampled grid with no opaque pixel or no variance.
+  - Retry order: the ImageBitmap, then the element it came from, then up to 3 later animation frames, each trying both.
+  - Recovery is logged ("blank snapshot recovered on retry N"). Exhaustion scores untrackable with the reason "BlankSnapshot: blank snapshot ..." in the log and in `__holoweb.images.stats.snapshotErrors`.
+  - The first pass still runs synchronously in requestSession. The snapshots are now a Promise, awaited before setTrackedImages.
+  - Side effect: a uniform image (the 1x1 test image) is now untrackable locally, without reaching native.
+- Tests: test/image-snapshot.test.ts covers willReadFrequently plus the white fill, blank then recovered on retry 1, blank x4 then untrackable, the first pass synchronous, and the earlier fallback and error cases.
+- Verification: npm test 115/115; e2e 40/40 (Chromium + WebKit image cases); WebKit full 37/37.

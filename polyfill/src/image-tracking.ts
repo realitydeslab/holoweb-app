@@ -59,7 +59,7 @@ export class XRImageTrackingResult {
 
 /** Carries the snapshots from the outermost requestSession wrapper to the session hook. */
 export const SNAPSHOTS = Symbol('holoweb.trackedImageSnapshots');
-export type SnapshotOptions = { trackedImages?: TrackedImageInit[]; requiredFeatures?: string[]; optionalFeatures?: string[]; [SNAPSHOTS]?: (NativeTrackedImage | null)[] };
+export type SnapshotOptions = { trackedImages?: TrackedImageInit[]; requiredFeatures?: string[]; optionalFeatures?: string[]; [SNAPSHOTS]?: Promise<(NativeTrackedImage | null)[]> };
 
 /**
  * Wrap requestSession outermost (install after every other requestSession hook) so images are drawn
