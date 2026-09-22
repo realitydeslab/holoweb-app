@@ -30,7 +30,7 @@ Minimum OS: iOS 27.0. Transport uses `WKJSHandle` (iOS 27) so native calls into 
 - `t`: ARFrame.timestamp in ms (Double)
 - `mode`: "mono" | "stereo"
 - `transform`: number[16] column-major display-oriented camera pose = `inverse(view)` (NOT raw `ARCamera.transform`, which is in sensor/landscape-right orientation). Use it directly as the WebXR viewer pose in `local` space.
-- `view`: number[16] column-major `ARCamera.viewMatrix(for: orientation)` where orientation = current interface orientation (mono) or `.landscapeLeft` (stereo)
+- `view`: number[16] column-major `ARCamera.viewMatrix(for: orientation)` where orientation = the live interface orientation (stereo locks it to `.landscapeRight`)
 - `proj`: number[16] column-major `ARCamera.projectionMatrix(for: orientation, viewportSize: webViewSizePx, zNear: 0.01, zFar: 1000)`. JS rewrites entries [10] and [14] from the session's depthNear/depthFar.
 - `light`: `{ ambientIntensity, ambientColorTemperature }` (lux, kelvin) or null
 - `tracking`: "normal" | "limited" | "notAvailable"
