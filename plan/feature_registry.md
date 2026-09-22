@@ -96,8 +96,8 @@ Immersive Web samples:
 | F4 | [hit-test-anchors](https://immersive-web.github.io/webxr-samples/hit-test-anchors.html) | device pass (R iw-hit-test-anchors.*) |
 | F5 | [proposals/plane-detection](https://immersive-web.github.io/webxr-samples/proposals/plane-detection.html) | device enters AR; `XRRay` global fixed (D8, headless under WKWebView conditions), device recheck pending; planes need surfaces |
 | F6 | [proposals/mesh-detection](https://immersive-web.github.io/webxr-samples/proposals/mesh-detection.html) | device pass (6/6: enters AR, meshes sent, no errors) |
-| F7 | [immersive-hands](https://immersive-web.github.io/webxr-samples/immersive-hands.html) | device enters **VR** (vrMono) now; polyfill does not grant hand-tracking in VR, so no onHands (wip) |
-| F8 | [webgpu/immersive-hands](https://immersive-web.github.io/webxr-samples/webgpu/immersive-hands.html) | device enters **VR** (vrMono); hand-tracking not granted in VR (polyfill wip) |
+| F7 | [immersive-hands](https://immersive-web.github.io/webxr-samples/immersive-hands.html) | device enters **VR** (vrMono); hand-tracking in VR granted since the capability fix 9fa6b55 (U vr-hands); device recheck with real hands pending |
+| F8 | [webgpu/immersive-hands](https://immersive-web.github.io/webxr-samples/webgpu/immersive-hands.html) | device enters **VR** (vrMono); hand-tracking in VR granted since 9fa6b55 (U vr-hands); device recheck pending |
 | F9 | [tests/interrupted-ar](https://immersive-web.github.io/webxr-samples/tests/interrupted-ar.html) | device enters AR (page's intended throw ignored) |
 | F10 | [tests/exit-button](https://immersive-web.github.io/webxr-samples/tests/exit-button.html) | device pass in VR (vrMono, 60 fps) |
 

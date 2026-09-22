@@ -108,7 +108,7 @@ On device (iPhone 15 Pro, iOS 27) unless noted.
 - **Immersive Web samples:**
   - pass: `hit-test`, `webgpu/immersive-ar-session`, `anchors`, `hit-test-anchors`, `proposals/mesh-detection`, `tests/exit-button` (VR).
   - enter AR, pending a full check: `proposals/plane-detection` (planes need real surfaces in view) and `tests/interrupted-ar`.
-  - enter VR, but hand tracking is not yet granted in VR: `immersive-hands` and `webgpu/immersive-hands`.
+  - enter VR: `immersive-hands` and `webgpu/immersive-hands`. Hand tracking in VR is granted since the capability fix (unit-tested), but not yet rechecked with real hands on device.
 - **three.js examples:** `webxr_ar_hittest`, `webxr_ar_lighting`, `webxr_ar_plane_detection` (live from threejs.org and bundled offline), and `webxr_ar_cones` (live).
 - **Image tracking:** the HoloWeb marker (0.15 m), PlayCanvas and Needle image-tracking samples.
 - **Gallery:** Toji's WebXR particles, PlayCanvas AR (iframe), model-viewer AR, Babylon.js, three.js lighting, and the Immersive Web samples. Needle, SuperSplat and ball-shooter entries are listed but not fully checked on device yet.
@@ -189,7 +189,7 @@ Debug builds accept launch environment variables for unattended runs:
 ## Known limitations
 
 - HoloKit optical alignment and stereo prediction tuning have not been checked in a real HoloKit X headset yet.
-- Hand tracking is not granted in `immersive-vr` sessions yet.
+- Hand tracking in `immersive-vr` (the Immersive Web hands samples) still needs a device recheck with real hands.
 - Plane detection needs textured surfaces and some phone movement; a still phone may take 10 s or more to report the first plane.
 - AR is thermally heavy. The camera and ARKit tracking use about 1.4 CPU cores even when idle. Rendering WebGL at 2× instead of 3× and lowering the camera format in stereo are the next planned savings.
 - The App Store Connect App Clip experience, TestFlight distribution and App Clip Code images are still to be set up.
