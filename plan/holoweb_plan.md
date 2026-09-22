@@ -170,3 +170,9 @@ Priority: M0-M4 are P0. M5 and M6 are P1 (M5 is the product differentiator; M6 u
 
 ## 7. Immediate next step
 Start M0: delete scratch targets, fix the `@EnvironmentObject` injection crash, and merge the two web view configurations into `WebViewRepresentable`. Then run the M1 WebGPU check page on a device.
+
+## 8. Latency follow-ups (added 2026-09-22 after M3 measurements)
+Throughput is solved (59.9 onFrame/s, 0 skipped, 2 calls in flight). Each callAsyncJavaScript round trip is ~17-20 ms; no faster native->page channel exists because WKWebView runs out of process.
+- M3b (P0): timestamp-matched camera background. Renderer keeps a 3-deep ring of captured-image textures keyed by ARFrame.timestamp; the polyfill reports the timestamp it rendered each XR frame (fire-and-forget `postMessage({type:"rendered", t})`); Renderer draws the matching image. Removes virtual/real drift in mono.
+- M5 (P1, moved from M8): pose prediction in stereo. Extrapolate to predicted display time from the last poses; full app adds CoreMotion gyro (unavailable in App Clip).
+- Measure first: one-way delivery latency, and whether WKWebView rAF runs at 60 or 120 Hz on ProMotion devices.
