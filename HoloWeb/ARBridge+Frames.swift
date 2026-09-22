@@ -20,7 +20,10 @@ extension ARBridge {
 extension ARBridge: ARSessionDelegate {
     nonisolated func session(_ session: ARSession, didUpdate frame: ARFrame) {
         nonisolated(unsafe) let frame = frame
-        MainActor.assumeIsolated { self.push(frame) }
+        MainActor.assumeIsolated {
+            self.stampPlaneUpdates(frame)
+            self.push(frame)
+        }
     }
 
     nonisolated func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
@@ -66,6 +69,19 @@ extension ARBridge: ARSessionDelegate {
             let id = anchor.identifier.uuidString
             if anchor is ARPlaneAnchor {
                 planesDirty = true
+                if removed {
+                    pendingPlaneUpdates.remove(anchor.identifier)
+                    planeLastChanged.removeValue(forKey: anchor.identifier)
+                } else {
+                    pendingPlaneUpdates.insert(anchor.identifier)
+                }
+            } else if let probe = anchor as? AREnvironmentProbeAnchor {
+                if removed {
+                    environmentProbes.removeValue(forKey: probe.identifier)
+                } else {
+                    environmentProbes[probe.identifier] = probe
+                    environmentDirty = true
+                }
             } else if pageAnchors[id] != nil {
                 anchorsDirty = true
                 if removed {
@@ -114,6 +130,7 @@ extension ARBridge: ARSessionDelegate {
         }
         pushAnchorsIfNeeded(now: frame.timestamp)
         pushPlanesIfNeeded(frame, now: frame.timestamp)
+        pushEnvironmentIfNeeded(frame)
     }
 
     private func logStats(_ frame: ARFrame) {
@@ -142,18 +159,59 @@ extension ARBridge: ARSessionDelegate {
         call("onAnchors(anchors)", ["anchors": anchors])
     }
 
+    /// Anchor callbacks for a frame arrive before `didUpdate frame`, so the frame's timestamp
+    /// is the time of those updates.
+    private func stampPlaneUpdates(_ frame: ARFrame) {
+        guard !pendingPlaneUpdates.isEmpty else { return }
+        for id in pendingPlaneUpdates { planeLastChanged[id] = frame.timestamp * 1000 }
+        pendingPlaneUpdates.removeAll()
+    }
+
     private func pushPlanesIfNeeded(_ frame: ARFrame, now: TimeInterval) {
         guard planesDirty, now - lastPlanesSent >= 0.1 else { return }
         planesDirty = false
         lastPlanesSent = now
+        var vertexCount = 0
         let planes: [[String: Any]] = frame.anchors.compactMap { $0 as? ARPlaneAnchor }.map { plane in
             let extent = plane.planeExtent
             let local = simd_float4x4(translation: plane.center) * simd_float4x4(yRotation: extent.rotationOnYAxis)
+            let (polygon, reversed) = Self.polygon(plane.geometry.boundaryVertices, relativeTo: local)
+            if !loggedPlaneWinding, !polygon.isEmpty {
+                loggedPlaneWinding = true
+                print("[bridge] ARKit plane boundary winding seen from +Y: \(reversed ? "clockwise (reversed)" : "counter-clockwise")")
+            }
+            vertexCount += polygon.count / 3
             return ["id": plane.identifier.uuidString,
                     "transform": (plane.transform * local).columnMajor,
                     "extent": [Double(extent.width), Double(extent.height)],
-                    "orientation": plane.alignment == .horizontal ? "horizontal" : "vertical"]
+                    "orientation": plane.alignment == .horizontal ? "horizontal" : "vertical",
+                    "polygon": polygon,
+                    "lastChanged": planeLastChanged[plane.identifier] ?? frame.timestamp * 1000]
+        }
+        if now - lastPlanesLog >= 2 {
+            lastPlanesLog = now
+            print("[bridge] planes sent n=\(planes.count) polygons=\(vertexCount)")
         }
         call("onPlanes(planes)", ["planes": planes])
+    }
+
+    /// Boundary vertices (anchor space) re-expressed in the sent plane frame `local`, flattened
+    /// to x,y,z with y = 0 and wound counter-clockwise seen from +Y. The winding is measured
+    /// rather than assumed, so it holds whatever order ARKit uses.
+    static func polygon(_ boundary: [simd_float3], relativeTo local: simd_float4x4) -> (vertices: [Double], reversed: Bool) {
+        let inverse = local.inverse
+        var points = boundary.map { v -> simd_float2 in
+            let p = inverse * simd_float4(v, 1)
+            return simd_float2(p.x, p.z)
+        }
+        guard points.count >= 3 else { return ([], false) }
+        // y component of sum(p_i x p_i+1) with p = (x, 0, z): positive means CCW about +Y.
+        var twiceArea: Float = 0
+        for i in points.indices {
+            let a = points[i], b = points[(i + 1) % points.count]
+            twiceArea += a.y * b.x - a.x * b.y
+        }
+        if twiceArea < 0 { points.reverse() }
+        return (points.flatMap { [Double($0.x), 0, Double($0.y)] }, twiceArea < 0)
     }
 }

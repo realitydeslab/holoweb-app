@@ -31,6 +31,20 @@ final class ARBridge: NSObject {
     static let maxFramesInFlight = 2
     var planesDirty = false
     var lastPlanesSent: TimeInterval = 0
+    var lastPlanesLog: TimeInterval = 0
+    var loggedPlaneWinding = false
+    /// Planes added or updated since the last ARFrame; stamped with that frame's timestamp.
+    var pendingPlaneUpdates: Set<UUID> = []
+    /// ARFrame timestamp (ms) of each plane's last add/update, sent as `lastChanged`.
+    var planeLastChanged: [UUID: Double] = [:]
+    /// Environment probes ARKit maintains (`environmentTexturing = .automatic`), by identifier.
+    var environmentProbes: [UUID: AREnvironmentProbeAnchor] = [:]
+    var environmentDirty = false
+    /// The page asked for "light-estimation"; environment maps (~33 KB each) are sent only then.
+    var environmentRequested = false
+    var lastEnvironmentSent: TimeInterval = 0
+    let environmentReader = EnvironmentProbeReader()
+    var loggedEnvironment = false
     /// Anchors the page created, by identifier. Held directly so removal never depends on
     /// `session.currentFrame` (nil while paused, stale right after creation).
     var pageAnchors: [String: ARAnchor] = [:]
@@ -128,10 +142,14 @@ extension ARBridge: WKScriptMessageHandlerWithReply {
                           "transport": bridgeHandle != nil ? "jshandle" : "global"], nil)
         case "requestSession":
             guard let state else { return replyHandler(nil, "app state unavailable") }
+            let features = body["features"] as? [String] ?? []
+            print("[bridge] requestSession features=\(features.joined(separator: ","))")
             state.xrSessionStarted()
             streaming = true
             planesDirty = true
             anchorsDirty = true
+            environmentDirty = true
+            environmentRequested = features.contains("light-estimation")
             replyHandler(["ok": true, "mode": state.mode.rawValue, "frameRate": 60], nil)
         case "endSession":
             stopStreaming()
@@ -213,6 +231,12 @@ extension ARBridge: WKNavigationDelegate {
     /// leaves the old page (and its bridge) in place.
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         resetPageState()
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        #if DEBUG
+        state?.runTestClick()
+        #endif
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {

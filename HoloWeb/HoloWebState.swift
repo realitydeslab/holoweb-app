@@ -47,6 +47,7 @@ final class HoloWebState: NSObject {
     let session = ARSession()
     let webView: WKWebView
     private(set) var bridge: ARBridge?
+    @ObservationIgnored private var testClickTask: Task<Void, Never>?
 
     private nonisolated static let logHandlerName = "holowebLog"
 
@@ -133,6 +134,25 @@ final class HoloWebState: NSObject {
                 try? await Task.sleep(for: .seconds(seconds))
                 guard self.isInXRSession else { return }
                 self.setMode(self.mode == .mono ? .stereo : .mono)
+            }
+        }
+    }
+
+    /// Test aid: HOLOWEB_TEST_CLICK=<CSS selector> clicks the first matching element 2.5 s after
+    /// each main-frame load, retrying up to 5 times at 1 s intervals (e.g. "#ARButton").
+    func runTestClick() {
+        guard let selector = ProcessInfo.processInfo.environment["HOLOWEB_TEST_CLICK"], !selector.isEmpty else { return }
+        testClickTask?.cancel()
+        testClickTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2.5))
+            for attempt in 0...5 {
+                guard !Task.isCancelled, let webView = self?.webView else { return }
+                let clicked = try? await webView.callAsyncJavaScript(
+                    "const el = document.querySelector(selector); if (!el) return false; el.click(); return true;",
+                    arguments: ["selector": selector], in: nil, contentWorld: .page) as? Bool
+                if clicked == true { return print("[test] clicked \(selector)") }
+                if attempt == 5 { return print("[test] no element \(selector)") }
+                try? await Task.sleep(for: .seconds(1))
             }
         }
     }

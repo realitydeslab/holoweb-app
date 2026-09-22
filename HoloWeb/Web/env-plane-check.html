@@ -1,0 +1,94 @@
+<!doctype html>
+<html>
+<head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>body{margin:0;background:transparent;color:#fff;font:13px -apple-system,sans-serif}pre{margin:70px 8px 8px;padding:8px;background:#0008;white-space:pre-wrap}canvas{margin:0 8px;image-rendering:pixelated}</style>
+</head>
+<body><pre id="out"></pre><div id="faces"></div>
+<script>
+// Raw-bridge check of onPlanes polygons and onEnvironment cube maps (plan/bridge_protocol.md).
+const out = document.getElementById("out");
+const log = (...a) => { const s = a.join(" "); console.log("[env-plane-check] " + s); out.textContent += s + "\n"; };
+const native = (msg) => window.webkit.messageHandlers.holoweb.postMessage(msg);
+// Machine-readable results for Scripts/regression.py: "[check] PASS|FAIL <name> <detail>".
+const check = (name, ok, detail = "") => console.log(`[check] ${ok ? "PASS" : "FAIL"} ${name} ${detail}`);
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+let planeCalls = 0, latestPlanes = [], maxPlanes = 0, envs = [];
+const bridge = {
+  onFrame() {},
+  onPlanes(list) { planeCalls++; latestPlanes = list; maxPlanes = Math.max(maxPlanes, list.length); },
+  onAnchors() {},
+  onEnvironment(env) { envs.push({ env, at: performance.now() }); },
+  onSessionEnded(reason) { log("sessionEnded", reason); },
+};
+window.__holoweb = bridge;
+
+const decode = (b64) => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+
+function checkPlanes() {
+  const planes = latestPlanes.length ? latestPlanes : [];
+  log("onPlanes calls:", planeCalls, "max planes:", maxPlanes, "latest:", planes.length);
+  check("planes.received", planes.length > 0, planes.length ? `${planes.length} planes` : "0 planes: needs real surfaces in view (move the phone)");
+  if (!planes.length) {
+    for (const name of ["planes.polygon-shape", "planes.polygon-ccw", "planes.polygon-in-extent", "planes.last-changed"]) check(name, false, "no planes");
+    return;
+  }
+  let shape = [], ccw = [], extent = [], changed = [];
+  for (const p of planes) {
+    const v = p.polygon;
+    if (!Array.isArray(v) || v.length % 3 || v.length < 9 || !v.every(Number.isFinite) || v.some((x, i) => i % 3 === 1 && x !== 0)) shape.push(p.id.slice(0, 8));
+    let a = 0; const n = v.length / 3;
+    for (let i = 0; i < n; i++) { const j = (i + 1) % n; a += v[3 * i + 2] * v[3 * j] - v[3 * i] * v[3 * j + 2]; }
+    if (!(a > 0)) ccw.push(p.id.slice(0, 8));
+    const [w, h] = p.extent, eps = 0.05;
+    if (v.some((x, i) => (i % 3 === 0 && Math.abs(x) > w / 2 + eps) || (i % 3 === 2 && Math.abs(x) > h / 2 + eps))) extent.push(p.id.slice(0, 8));
+    if (!(typeof p.lastChanged === "number" && p.lastChanged > 0)) changed.push(p.id.slice(0, 8));
+    log("plane", p.id.slice(0, 8), p.orientation, "extent", w.toFixed(2) + "x" + h.toFixed(2), "vertices", n, "area", (a / 2).toFixed(3), "lastChanged", p.lastChanged);
+  }
+  const verts = planes.reduce((s, p) => s + p.polygon.length / 3, 0);
+  check("planes.polygon-shape", !shape.length, shape.length ? "bad: " + shape.join(",") : `${verts} vertices`);
+  check("planes.polygon-ccw", !ccw.length, ccw.length ? "not ccw: " + ccw.join(",") : "");
+  check("planes.polygon-in-extent", !extent.length, extent.length ? "outside extent: " + extent.join(",") : "");
+  check("planes.last-changed", !changed.length, changed.length ? "missing: " + changed.join(",") : "");
+}
+
+function checkEnvironment() {
+  log("onEnvironment calls:", envs.length);
+  check("env.received", envs.length > 0, `${envs.length} maps`);
+  if (!envs.length) {
+    for (const name of ["env.shape", "env.not-blank", "env.rate"]) check(name, false, "no environment map");
+    return;
+  }
+  const { env } = envs[envs.length - 1];
+  const faces = Array.isArray(env.faces) ? env.faces.map(decode) : [];
+  const expected = env.size * env.size * 4;
+  const shapeOk = env.size === 32 && env.format === "rgba8" && env.colorSpace === "srgb" && typeof env.timestamp === "number" &&
+    faces.length === 6 && faces.every(f => f.length === expected);
+  check("env.shape", shapeOk, `size=${env.size} faces=${faces.length} bytes=${faces.map(f => f.length).join("/")}`);
+  const means = faces.map(f => { let s = 0; for (let i = 0; i < f.length; i += 4) s += f[i] + f[i + 1] + f[i + 2]; return s / (f.length / 4 * 3); });
+  log("face mean rgb [px,nx,py,ny,pz,nz]:", means.map(m => m.toFixed(1)).join(" "));
+  check("env.not-blank", means.some(m => m > 0), "means " + means.map(m => m.toFixed(0)).join("/"));
+  const gaps = envs.slice(1).map((e, i) => e.at - envs[i].at);
+  check("env.rate", gaps.every(g => g >= 800), gaps.length ? `min gap ${Math.min(...gaps).toFixed(0)} ms` : "1 map");
+  // Show the faces for a human glance.
+  faces.forEach(f => {
+    const c = document.createElement("canvas"); c.width = c.height = env.size; c.style.width = c.style.height = "48px";
+    c.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(f), env.size), 0, 0);
+    document.getElementById("faces").appendChild(c);
+  });
+}
+
+(async () => {
+  const handle = typeof window.webkit?.createJSHandle === "function" ? window.webkit.createJSHandle(bridge) : null;
+  await native({ type: "ready", bridge: handle });
+  await native({ type: "requestSession", mode: "immersive-ar", features: ["local", "plane-detection", "light-estimation"] });
+  const t0 = performance.now();
+  while (performance.now() - t0 < 20000 && !(envs.length >= 3 && maxPlanes > 0 && performance.now() - t0 > 8000)) await sleep(250);
+  log("waited ms:", (performance.now() - t0).toFixed(0));
+  checkEnvironment();
+  checkPlanes();
+  await native({ type: "endSession" });
+  log("DONE");
+})().catch(e => { log("ERROR", e.message); check("env-plane.script", false, e.message); });
+</script>
+</body></html>

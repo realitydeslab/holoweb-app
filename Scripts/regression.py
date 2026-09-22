@@ -155,6 +155,39 @@ def toggle_run(report: Report, device: str, page: str, label: str, seconds: int 
     report.add(f"device.{label}.no-page-errors", not errors, "; ".join(errors[:2]))
 
 
+def third_party_run(report: Report, device: str, url: str, label: str, seconds: int = 30) -> None:
+    """Opens a third-party WebXR page, presses its three.js ARButton, checks AR entry and streaming."""
+    log = launch(device, {"HOLOWEB_URL": url, "HOLOWEB_TEST_CLICK": "#ARButton"}, seconds)
+    name = f"device.{label}"
+    clicked = re.search(r"\[test\] (clicked|no element) (.*)", log)
+    report.add(f"{name}.clicked", bool(clicked) and clicked.group(1) == "clicked",
+               clicked.group(0) if clicked else "no [test] line (page never finished loading?)")
+    report.add(f"{name}.entered-ar", "phase -> arMono" in log)
+    stats = [(int(p), int(s)) for p, s in re.findall(r"\[bridge\] ARKit .* pushed (\d+), skipped (\d+)", log)]
+    if stats:
+        pushed, skipped = stats[-1]
+        report.add(f"{name}.frames", pushed > 0 and skipped <= 0.1 * pushed,
+                   f"pushed {pushed}, skipped {skipped} (<= 10%)")
+    else:
+        report.add(f"{name}.frames", False, "no [bridge] ARKit stats line")
+    # Deprecation notices arrive as "warn:" and are ignored.
+    errors = re.findall(r"\[web\] (?:error|uncaught|unhandledrejection): ([^\n]*)", log)
+    report.add(f"{name}.no-page-errors", not errors, "; ".join(e[:120] for e in errors[:2]))
+    features_line = re.search(r"\[bridge\] requestSession features=([^\n]*)", log)
+    features = features_line.group(1).strip().split(",") if features_line else []
+    if label == "three-plane-detection":
+        report.add(f"{name}.feature", "plane-detection" in features, ",".join(features) or "no requestSession")
+        polygons = [(int(n), int(v)) for n, v in re.findall(r"\[bridge\] planes sent n=(\d+) polygons=(\d+)", log)]
+        best = max(polygons, key=lambda nv: nv[1], default=(0, 0))
+        report.add(f"{name}.planes", best[1] > 0,
+                   f"max n={best[0]} polygons={best[1]}" if best[1] else
+                   f"no plane polygons ({len(polygons)} sends): needs real surfaces in view, move the phone")
+    elif label == "three-lighting":
+        report.add(f"{name}.feature", "light-estimation" in features, ",".join(features) or "no requestSession")
+        env = re.search(r"\[bridge\] environment map sent ([^\n]*)", log)
+        report.add(f"{name}.environment", bool(env), env.group(1) if env else "no environment map sent")
+
+
 def stage_device(report: Report, device: str) -> None:
     print(f"\n[3/3] device {device}", flush=True)
     install = run(["xcrun", "devicectl", "device", "install", "app", "--device", device, str(app_path())])
@@ -172,9 +205,18 @@ def stage_device(report: Report, device: str) -> None:
         "bridge.unknown-type-rejected", "bridge.end-session-stops-frames"])
     page_checks(report, device, "xr-anchor-check.html", 16, [
         "xr.anchor-created", "xr.anchor-tracked-pose", "xr.anchor-deleted"])
+    # Plane checks need real surfaces in view; a phone lying still on a desk sees none.
+    page_checks(report, device, "env-plane-check.html", 30, [
+        "env.received", "env.shape", "env.not-blank", "env.rate", "planes.received",
+        "planes.polygon-shape", "planes.polygon-ccw", "planes.polygon-in-extent", "planes.last-changed"])
 
     toggle_run(report, device, "examples/three-ar.html?autostart", "three-webgl")
     toggle_run(report, device, "examples/three-ar-webgpu.html?autostart", "three-webgpu")
+
+    examples = "https://threejs.org/examples/"
+    third_party_run(report, device, examples + "webxr_ar_hittest.html", "three-hittest")
+    third_party_run(report, device, examples + "webxr_ar_plane_detection.html", "three-plane-detection")
+    third_party_run(report, device, examples + "webxr_ar_lighting.html", "three-lighting")
 
     log = launch(device, {"HOLOWEB_PAGE": "examples/demo.html"}, 10)
     report.add("device.browsing-without-session",
