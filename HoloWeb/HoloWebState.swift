@@ -6,6 +6,17 @@ import Observation
 import SwiftUI
 import WebKit
 
+/// What the screen is doing. Browsing is an ordinary web page; the two AR states exist only
+/// while the page holds an immersive-ar session.
+enum ViewerPhase: Equatable {
+    /// Normal website on an opaque background, camera off.
+    case browsing
+    /// "Start AR": page turns transparent over the camera image.
+    case arMono
+    /// HoloKit stereo via the top-right toggle: black background, two eye views, landscape lock.
+    case arStereo
+}
+
 /// How the web content is presented on the phone screen.
 enum RenderMode: String {
     /// Handheld AR: one view, camera image drawn behind the web page.
@@ -23,8 +34,15 @@ enum RenderMode: String {
 @MainActor
 final class HoloWebState: NSObject {
     private(set) var url: URL?
-    var mode: RenderMode = .mono
+    private(set) var mode: RenderMode = .mono
     private(set) var isARRunning = false
+    /// True while the page holds an immersive-ar session (between requestSession and its end).
+    private(set) var isInXRSession = false
+
+    var phase: ViewerPhase {
+        guard isInXRSession else { return .browsing }
+        return mode == .stereo ? .arStereo : .arMono
+    }
 
     let session = ARSession()
     let webView: WKWebView
@@ -77,11 +95,53 @@ final class HoloWebState: NSObject {
     /// which is how the phone sits in HoloKit X (Unity's LandscapeLeft).
     func setMode(_ newMode: RenderMode) {
         mode = newMode
+        print("[state] mode -> \(newMode.rawValue), phase -> \(phase)")
         guard let scene = webView.window?.windowScene else { return }
         let mask: UIInterfaceOrientationMask = newMode == .stereo ? .landscapeRight : .allButUpsideDown
         scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { error in
             print("[state] orientation request failed: \(error.localizedDescription)")
         }
+    }
+
+    /// Page started an immersive-ar session ("Start AR"). The mode stays whatever it is
+    /// (mono unless a test page asked for stereo before starting).
+    func xrSessionStarted() {
+        isInXRSession = true
+        startARSession()
+        print("[state] phase -> \(phase)")
+        #if DEBUG
+        startDebugToggle()
+        #endif
+    }
+
+    /// The session ended (page exit, native exit button, navigation, or ARKit failure):
+    /// back to browsing, camera off, mono, orientation unlocked.
+    func xrSessionEnded() {
+        isInXRSession = false
+        pauseARSession()
+        if mode != .mono { setMode(.mono) }
+        print("[state] phase -> \(phase)")
+    }
+
+    #if DEBUG
+    /// Test aid: HOLOWEB_TEST_TOGGLE=<seconds> presses the mono/stereo button on that interval.
+    private func startDebugToggle() {
+        guard let raw = ProcessInfo.processInfo.environment["HOLOWEB_TEST_TOGGLE"],
+              let seconds = Double(raw), seconds > 0 else { return }
+        Task { @MainActor [weak self] in
+            while let self, self.isInXRSession {
+                try? await Task.sleep(for: .seconds(seconds))
+                guard self.isInXRSession else { return }
+                self.setMode(self.mode == .mono ? .stereo : .mono)
+            }
+        }
+    }
+    #endif
+
+    /// Top-right exit button.
+    func exitXR() {
+        bridge?.endSessionFromNative(reason: "user")
+        xrSessionEnded()
     }
 
     func load(_ url: URL) {

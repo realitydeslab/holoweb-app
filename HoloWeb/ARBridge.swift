@@ -92,7 +92,7 @@ final class ARBridge: NSObject {
         pageAnchors.values.forEach(session.remove(anchor:))
         pageAnchors.removeAll()
         removedAnchorIDs.removeAll()
-        state?.pauseARSession()
+        state?.xrSessionEnded()
     }
 
     /// Ends the page's XR session from the native side (failure, interruption).
@@ -128,14 +128,14 @@ extension ARBridge: WKScriptMessageHandlerWithReply {
                           "transport": bridgeHandle != nil ? "jshandle" : "global"], nil)
         case "requestSession":
             guard let state else { return replyHandler(nil, "app state unavailable") }
-            state.startARSession()
+            state.xrSessionStarted()
             streaming = true
             planesDirty = true
             anchorsDirty = true
             replyHandler(["ok": true, "mode": state.mode.rawValue, "frameRate": 60], nil)
         case "endSession":
             stopStreaming()
-            state?.pauseARSession()
+            state?.xrSessionEnded()
             replyHandler(["ok": true], nil)
         case "hitTest":
             replyHandler(["hits": hitTest(body)], nil)

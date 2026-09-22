@@ -44,6 +44,7 @@ extension ARBridge: ARSessionDelegate {
             print("[bridge] ARSession failed: \(message)")
             self.state?.markARStopped()
             self.endSessionFromNative(reason: "failed: \(message)")
+            self.state?.xrSessionEnded()
         }
     }
 
