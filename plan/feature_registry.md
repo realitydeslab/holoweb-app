@@ -75,10 +75,10 @@ Test sources: **R** = `Scripts/regression.py` (on device) · **U** = `polyfill` 
 | E1 | hit-test (+ transient input for screen taps) | device | R three-hittest; E |
 | E2 | anchors (ARKit ARAnchor), createAnchor from earlier hit result | device (raw), headless (samples) | R bridge.anchor-roundtrip, xr.anchor-*; E |
 | E3 | plane-detection (polygons, stable XRPlane identity, lastChanged) | device (env-plane-check 5/5 on the laptop screen: vertical plane 0.55x0.20 m, 7-vertex CCW polygon) | R planes.*, three-plane-detection.planes, iw-plane-detection.planes; human (surfaces in view) |
-| E4 | mesh-detection (LiDAR ARMeshAnchor, ≤2 Hz, changed only, ~2 MB split, semanticLabel) | native device-built (reconstruction on, no meshes while still); polyfill headless (U meshes, E mesh-detection sample) | R mesh.reconstruction-enabled, mesh.no-errors, mesh.* (when meshes), iw-mesh-detection; human |
+| E4 | mesh-detection (LiDAR ARMeshAnchor, ≤2 Hz, changed only, ~2 MB split, semanticLabel) | native device (mesh-check: 41 meshes / 14 updates, 3422 vertices, 3993 triangles, indices in range, min gap 580 ms); polyfill wip | R mesh.reconstruction-enabled, mesh.no-errors, mesh.received, mesh.shape, mesh.indices-in-range, mesh.rate, iw-mesh-detection |
 | E5 | light-estimation: XRLightProbe, estimate, reflection cube map (32 px sRGB) | device (env map) | R env.*, three-lighting.environment |
 | E6 | hand-tracking (Vision + LiDAR, 25 joints, pinch select, grab squeeze, One Euro) | native device (G10 payload `{t, hands}`, 27–60 results/s, Vision 7–11 ms; no hand yet); JS headless (U hands, hand-gestures; E three-ar-hands, immersive-hands) | R hands.tracker-rate, hands.timestamp, hands.log-line, hands.no-errors, hands.* (when a hand), iw-hands.hands, iw-webgpu-hands.hands; human (hand, chirality) |
-| E7 | image-tracking ([explainer](https://github.com/immersive-web/image-tracking/blob/main/explainer.md)): trackedImages, scores, results, imageSpace convention (`anchor * Rx(-90°)`) | device (native): marker on laptop screen tracked, 279 results, width 0.150 m, axes orthonormal, +Z·toCamera 0.79, +Y up 0.86; polyfill page wip | R image.scores, image.arkit-detection-images, image.* (when tracked), *-image-tracking.set-tracked-images / image-tracking-run / image-tracked; human |
+| E7 | image-tracking ([explainer](https://github.com/immersive-web/image-tracking/blob/main/explainer.md)): trackedImages, scores, results, imageSpace convention (`anchor * Rx(-90°)`) | native device (image-check vs marker on the laptop screen: 280 tracked results, width 0.150 m, axes orthonormal, z·toCamera 0.79, y·up 0.86); polyfill wip | R image.scores, image.arkit-detection-images, image.results-shape, image.marker-tracked, image.width, image.axes-orthonormal, image.z-toward-viewer, image.y-up-when-upright, *-image-tracking.*; human (marker in view) |
 | E8 | dom-overlay (root = body, beforexrselect) | headless | U dom-overlay; E plane-detection sample |
 | E9 | local-floor from lowest plane + reset event | headless | U light-floor |
 | E10 | Inline + immersive sessions coexist; inline canvas untouched | headless | U inline-sessions; E anchors, interrupted-ar |
@@ -96,8 +96,8 @@ Immersive Web samples:
 | F4 | [hit-test-anchors](https://immersive-web.github.io/webxr-samples/hit-test-anchors.html) | device pass (R iw-hit-test-anchors.*) |
 | F5 | [proposals/plane-detection](https://immersive-web.github.io/webxr-samples/proposals/plane-detection.html) | device enters AR; `XRRay` global fixed (D8, headless under WKWebView conditions), device recheck pending; planes need surfaces |
 | F6 | [proposals/mesh-detection](https://immersive-web.github.io/webxr-samples/proposals/mesh-detection.html) | native ready; polyfill supports mesh-detection (headless pass, capability-gated on LiDAR), device recheck pending |
-| F7 | [immersive-hands](https://immersive-web.github.io/webxr-samples/immersive-hands.html) | device enters, onHands 60/s; hand in view: human |
-| F8 | [webgpu/immersive-hands](https://immersive-web.github.io/webxr-samples/webgpu/immersive-hands.html) | device enters, onHands 60/s; hand in view: human |
+| F7 | [immersive-hands](https://immersive-web.github.io/webxr-samples/immersive-hands.html) | device enters **VR** (vrMono) now; polyfill does not grant hand-tracking in VR, so no onHands (wip) |
+| F8 | [webgpu/immersive-hands](https://immersive-web.github.io/webxr-samples/webgpu/immersive-hands.html) | device enters **VR** (vrMono); hand-tracking not granted in VR (polyfill wip) |
 | F9 | [tests/interrupted-ar](https://immersive-web.github.io/webxr-samples/tests/interrupted-ar.html) | device enters AR (page's intended throw ignored) |
 | F10 | [tests/exit-button](https://immersive-web.github.io/webxr-samples/tests/exit-button.html) | device pass in VR (vrMono, 60 fps) |
 
@@ -107,14 +107,14 @@ three.js examples:
 | F11 | [webxr_ar_hittest](https://threejs.org/examples/webxr_ar_hittest.html) | device pass |
 | F12 | [webxr_ar_lighting](https://threejs.org/examples/webxr_ar_lighting.html) | device pass |
 | F13 | [webxr_ar_plane_detection](https://threejs.org/examples/webxr_ar_plane_detection.html) | device enters AR with plane-detection; planes need surfaces (human) |
-| F14 | HoloWeb examples: three-ar, three-ar-webgpu, demo, three-ar-hands, image-tracking | device (first three); hands/image wip |
+| F14 | HoloWeb examples: three-ar, three-ar-webgpu, demo, three-ar-hands, image-tracking | device (first three); hands, image-tracking headless (E) |
 
 Image tracking:
 | ID | Page | Status |
 |---|---|---|
-| F15 | `examples/image-tracking.html` + HoloWeb marker (0.15 m, to publish on holoweb.app) | wip (polyfill page); R example-image-tracking.* |
-| F16 | [PlayCanvas image tracking](https://playcanv.as/p/PCsSvN5h/) | device enters AR (iframe, js click); image-tracking not requested until polyfill supports it; R playcanvas-image-tracking.* |
-| F17 | [Needle image tracking](https://engine.needle.tools/samples/image-tracking/) | the gallery embeds the app in a cross-origin iframe (bridge refuses it); app URL image-tracking-zubckszr0qj2.needle.run enters AR (shadow-DOM button); R needle-image-tracking.* |
+| F15 | `examples/image-tracking.html` + HoloWeb marker (0.15 m, to publish on holoweb.app) | headless pass (E: scores, tracked/emulated, gizmo, ?stats log, 1x1 untrackable fixture); R example-image-tracking.*; marker in view: human |
+| F16 | [PlayCanvas image tracking](https://playcanv.as/p/PCsSvN5h/) | device enters AR (iframe, js click); headless pass against the mock (E: tap enters AR, results in the iframe); R playcanvas-image-tracking.* |
+| F17 | [Needle image tracking](https://engine.needle.tools/samples/image-tracking/) | the gallery embeds the app in a cross-origin iframe (bridge refuses it); app URL image-tracking-zubckszr0qj2.needle.run enters AR (shadow-DOM button); headless pass on the app URL (E: 2 images trackable, results reach the page); R needle-image-tracking.* |
 
 Gallery (https://holoweb.app/, 15 entries; each to be opened on device):
 | ID | Entry | Status |

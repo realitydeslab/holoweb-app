@@ -558,3 +558,30 @@ Spec: https://github.com/immersive-web/image-tracking/blob/main/explainer.md (ID
     - PlayCanvas live: the tap enters AR in its same-origin iframe; results are queried every frame.
     - Needle app URL live, via the needle-menu "Enter AR" in its shadow root: 2 images trackable.
 - Verification (2026-09-22): npm test 106/106 (15 files), e2e 33/33 with Chromium's WebXR stripped, tsc clean, build 181.8 KB (56.9 KB gzip).
+
+## Native execution log (G10 hands payload, immersive-vr, capabilities, image tracking)
+2026-09-22 evening, same phone. It now faces the laptop screen, which shows the HoloWeb marker (15.0 cm wide). All device commands go through Scripts/device-lock.py.
+
+Changes:
+- onHands now sends `{ t, hands: [{ handedness, joints, confidence, depthValid }] }` (G10).
+  - Vision runs with orientation .up. Joint depth is a 3x3 median of pixels with confidence >= medium, clamped to the palm depth (median of wrist, thumb CMC and 4 MCPs) ± 0.08 m. A joint outside that window, or without depth, gets palm + its previous offset and a cleared depthValid bit.
+  - Hands with unknown chirality are dropped.
+  - Rate: 30 Hz, 15 Hz at thermal state serious, off at critical. Calls are coalesced.
+  - Measured with no hand in view: 27–30 results/s, Vision 7.9–10.8 ms.
+- immersive-vr: ViewerPhase gains vrMono and vrStereo. `blendsCamera` is true only for arMono. The exit label reads "Exit VR". tests/exit-button enters vrMono and renders an opaque scene at 60 fps (checked with a device screenshot).
+- The ready reply has `capabilities { lidar, sceneReconstruction, handTracking }`.
+- ImageTracker.swift: setTrackedImages builds ARReferenceImage (orientation .up) and awaits validate(). At most 4 images are trackable. Scale estimation is on. onImages sends `anchor.transform * Rx(-90°)` (the math is documented in the file).
+- The test click also searches open shadow roots (Needle's AR button is inside `<needle-menu>`).
+- regression.py: image_run and three image-tracking third_party_run entries. Expectations moved to Scripts/regression_targets.py (regression.py is 375 lines).
+
+`regression.py --skip-polyfill`: 134/158.
+- image-check vs the on-screen marker, all 8 PASS: scores trackable/untrackable/trackable; "image tracking n=2"; 280 tracked results; width 0.150 m; axes orthonormal (max |dot| 0.000); z·toCamera 0.79; y·worldUp 0.86 (image top is up; the screen leans back, z·up 0.51).
+- mesh-check, 6/6 PASS: 41 meshes in 14 updates, 3422 vertices, 3993 triangles, indices in range, min gap 580 ms.
+- env-plane-check planes: 5/5 PASS in a single run before the full regression (vertical plane 0.55x0.20 m, 7-vertex CCW polygon). 0 planes in this full run.
+- Failures:
+  - planes 0 this time (5 + three-plane-detection + iw-plane-detection);
+  - iw-plane-detection XRRay missing (polyfill);
+  - PlayCanvas and Needle image tracking enter AR but do not request image-tracking (polyfill has no image-tracking yet);
+  - examples/image-tracking.html is not bundled yet (6);
+  - iw-hands and iw-webgpu-hands now enter VR, where the polyfill does not grant hand-tracking (4).
+- engine.needle.tools/samples/image-tracking/ embeds its app in a cross-origin iframe (image-tracking-zubckszr0qj2.needle.run), which the bridge refuses, so regression tests the app URL directly.

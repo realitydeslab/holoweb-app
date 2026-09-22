@@ -15,7 +15,7 @@ Minimum OS: iOS 27.0. Transport uses `WKJSHandle` (iOS 27) so native calls into 
 ## JS -> native messages (all via `window.webkit.messageHandlers.holoweb.postMessage(obj)`, all return a Promise)
 | type | payload | reply |
 |---|---|---|
-| `ready` | `{ bridge: WKJSHandle \| null, frame?: string }` | `{ ok, device: { model, screenWidthPx, screenHeightPx, scale, dpi }, mode, capabilities: { lidar, sceneReconstruction, handTracking } }` |
+| `ready` | `{ bridge: WKJSHandle \| null, frame?: string }` | `{ ok, device: { model, screenWidthPx, screenHeightPx, scale, dpi }, mode, capabilities: { lidar, sceneDepth, sceneReconstruction, handTracking } }` |
 | `requestSession` | `{ mode: "immersive-ar" \| "immersive-vr" \| "inline", features: string[] }` | `{ ok, mode: "mono" \| "stereo", frameRate }` — native starts pushing frames. immersive-vr: ARKit still tracks, but the camera image is never drawn (phase vrMono / vrStereo, black background) |
 | `endSession` | `{}` | `{ ok }` — native stops pushing frames |
 | `hitTest` | `{ origin: [x,y,z], direction: [x,y,z] }` (world space, metres) | `{ hits: [{ pose: number[16], type: "plane" \| "estimated" }] }` |

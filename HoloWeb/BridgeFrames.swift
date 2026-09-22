@@ -92,7 +92,10 @@ extension ARBridge {
     /// Reported in the `ready` reply so the polyfill advertises only what this phone can do
     /// (e.g. mesh-detection on LiDAR phones only).
     static var capabilities: [String: Bool] {
-        ["lidar": ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth),
+        // `sceneDepth` is what the polyfill reads (it gates hand-tracking); `lidar` kept for older pages.
+        ["sceneDepth": ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth),
+         "lidar": ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth),
+         "sceneDepth": ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth),
          "sceneReconstruction": ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh),
          "handTracking": true]
     }

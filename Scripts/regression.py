@@ -25,6 +25,10 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from regression_targets import (ENVIRONMENT, IFRAME, IMAGE_RUN, IMAGE_TRACKED, IMMERSIVE_WEB,
+                                IMMERSIVE_WEB_SAMPLES, PLANES, SAMPLE_BUTTON, SAMPLE_INTENDED_ERRORS,
+                                SET_IMAGES, Expect)
+
 ROOT = Path(__file__).resolve().parent.parent
 POLYFILL = ROOT / "polyfill"
 BUNDLE_ID = "org.realitydeslab.holoweb"
@@ -155,47 +159,10 @@ def toggle_run(report: Report, device: str, page: str, label: str, seconds: int 
     report.add(f"device.{label}.no-page-errors", not errors, "; ".join(errors[:2]))
 
 
-@dataclass(frozen=True)
-class Expect:
-    """A log line a third-party run must produce: check name suffix, regex, hint if missing."""
-    name: str
-    pattern: str
-    hint: str
-
-
-PLANES = Expect("planes", r"\[bridge\] planes sent n=\d+ polygons=[1-9]\d*",
-                "no plane polygons: needs real surfaces in view, move the phone")
-ENVIRONMENT = Expect("environment", r"\[bridge\] environment map sent [^\n]*", "no environment map sent")
-HANDS = Expect("hands", r"\[bridge\] hands sent [^\n]*", "hand tracker never reported")
-MESHES = Expect("meshes", r"\[bridge\] meshes sent n=[1-9][^\n]*",
-                "no meshes: LiDAR needs geometry in view, move the phone")
-IFRAME = Expect("iframe-bridge", r"\[bridge\] ready \S+ \(iframe\)[^\n]*", "no same-origin iframe sent ready")
-
-IMMERSIVE_WEB = "https://immersive-web.github.io/webxr-samples/"
-SAMPLE_BUTTON = "button.webvr-ui-button"  # WebXRButton from js/util/webxr-button.js
-# (path, label, required requestSession features, expected log lines). Known gaps per page are
-# listed in plan/samples_requirements.md.
-IMMERSIVE_WEB_SAMPLES: list[tuple[str, str, tuple[str, ...], tuple[Expect, ...]]] = [
-    ("proposals/mesh-detection.html", "iw-mesh-detection", ("mesh-detection",), (MESHES,)),
-    ("proposals/plane-detection.html", "iw-plane-detection", ("plane-detection",), (PLANES,)),
-    ("webgpu/immersive-ar-session.html", "iw-webgpu-ar-session", ("webgpu",), ()),
-    ("webgpu/immersive-hands.html", "iw-webgpu-hands", ("hand-tracking",), (HANDS,)),
-    ("anchors.html", "iw-anchors", ("anchors",), ()),
-    ("hit-test.html", "iw-hit-test", ("hit-test",), ()),
-    ("hit-test-anchors.html", "iw-hit-test-anchors", ("hit-test", "anchors"), ()),
-    ("immersive-hands.html", "iw-hands", ("hand-tracking",), (HANDS,)),
-    ("tests/interrupted-ar.html", "iw-interrupted-ar", (), ()),
-    ("tests/exit-button.html", "iw-exit-button", (), ()),
-]
-
-
-# tests/interrupted-ar deliberately throws (`new Exception(...)`) right after requestSession.
-SAMPLE_INTENDED_ERRORS = {"iw-interrupted-ar": r"Can't find variable: Exception"}
-
-
 def third_party_run(report: Report, device: str, url: str, label: str, seconds: int = 30,
                     click: str = "#ARButton", features: tuple[str, ...] = (),
-                    expect: tuple[Expect, ...] = (), ignore_errors: str | None = None) -> None:
+                    expect: tuple[Expect, ...] = (), ignore_errors: str | None = None,
+                    human: tuple[Expect, ...] = ()) -> None:
     """Opens a third-party WebXR page, presses its AR button (CSS selector, or "js:<expr>" for
     canvas-drawn buttons; same-origin iframes are searched too), checks AR entry and streaming,
     that `features` were requested, and that each `expect` line was logged. Page errors matching
@@ -229,6 +196,13 @@ def third_party_run(report: Report, device: str, url: str, label: str, seconds: 
     for item in expect:
         found = re.findall(item.pattern, log)
         report.add(f"{name}.{item.name}", bool(found), found[-1].strip() if found else item.hint)
+    # Checks that only a person can set up (marker in view): pass if seen, INFO otherwise.
+    for item in human:
+        found = re.findall(item.pattern, log)
+        if found:
+            report.add(f"{name}.{item.name}", True, found[-1].strip())
+        else:
+            print(f"  INFO  {name}.{item.name}  {item.hint}", flush=True)
 
 
 def hands_run(report: Report, device: str, seconds: int = 22) -> None:
@@ -273,6 +247,27 @@ def mesh_run(report: Report, device: str, seconds: int = 22) -> None:
               "mesh.shape / indices-in-range / rate", flush=True)
 
 
+def image_run(report: Report, device: str, seconds: int = 30) -> None:
+    """image-check.html: scores and the ARKit restart are checked always; pose checks only when
+    the HoloWeb marker (Web/assets/holoweb-marker.png, 15 cm wide) was in view."""
+    log = launch(device, {"HOLOWEB_PAGE": "image-check.html"}, seconds)
+    seen = {m.group(2): (m.group(1) == "PASS", m.group(3).strip())
+            for m in re.finditer(r"\[check\] (PASS|FAIL) (\S+) ?([^\n]*)", log)}
+    ok, detail = seen.get("image.scores", (False, "no result"))
+    report.add("device.image.scores", ok, detail)
+    run = re.search(r"\[bridge\] image tracking n=(\d+)", log)
+    report.add("device.image.arkit-detection-images", bool(run) and run.group(1) == "2",
+               run.group(0) if run else "ARKit never ran with detection images")
+    if seen.get("image.marker-tracked", (False, ""))[0]:
+        for name in ["image.results-shape", "image.marker-tracked", "image.width", "image.axes-orthonormal",
+                     "image.z-toward-viewer", "image.y-up-when-upright"]:
+            ok, detail = seen.get(name, (False, "no result"))
+            report.add(f"device.{name}", ok, detail)
+    else:
+        print("  INFO  device.image.*  marker not tracked; show Web/assets/holoweb-marker.png 15 cm wide to the "
+              "camera for results-shape / width / axes", flush=True)
+
+
 def stage_device(report: Report, device: str) -> None:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from importlib import import_module
@@ -309,6 +304,7 @@ def _stage_device(report: Report, device: str) -> None:
 
     hands_run(report, device)
     mesh_run(report, device)
+    image_run(report, device)
 
     examples = "https://threejs.org/examples/"
     third_party_run(report, device, examples + "webxr_ar_hittest.html", "three-hittest")
@@ -321,6 +317,20 @@ def _stage_device(report: Report, device: str) -> None:
                     click="js:window.pc && pc.Application.getApplication() && "
                           "(pc.Application.getApplication().fire('ar:request:start'), true)",
                     expect=(IFRAME,))
+    # Image tracking: PlayCanvas (canvas button in a same-origin iframe), Needle (button in a
+    # shadow root; engine.needle.tools/samples/image-tracking/ embeds this app in a cross-origin
+    # iframe, which the bridge refuses, so the app URL is tested directly), our example page.
+    third_party_run(report, device, "https://playcanv.as/p/PCsSvN5h/", "playcanvas-image-tracking",
+                    click="js:(a => { const s = a && a.root.findComponents('script').find(c => c.xrBasic); "
+                          "if (!s) return false; s.xrBasic.button.element.fire('click'); return true; })"
+                          "(window.pc && pc.Application.getApplication())",
+                    features=("image-tracking",), expect=(SET_IMAGES, IMAGE_RUN), human=(IMAGE_TRACKED,))
+    third_party_run(report, device, "https://image-tracking-zubckszr0qj2.needle.run/", "needle-image-tracking",
+                    click='[data-needle="webxr-ar-button"]',
+                    features=("image-tracking",), expect=(SET_IMAGES, IMAGE_RUN), human=(IMAGE_TRACKED,))
+    third_party_run(report, device, "holoweb-app://local/examples/image-tracking.html?autostart&stats",
+                    "example-image-tracking", click="js:true",
+                    features=("image-tracking",), expect=(SET_IMAGES, IMAGE_RUN), human=(IMAGE_TRACKED,))
     for path, label, features, expect in IMMERSIVE_WEB_SAMPLES:
         third_party_run(report, device, IMMERSIVE_WEB + path, label, click=SAMPLE_BUTTON,
                         features=features, expect=expect, ignore_errors=SAMPLE_INTENDED_ERRORS.get(label))

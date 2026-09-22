@@ -175,7 +175,7 @@ final class HoloWebState: NSObject {
         }
     }
 
-    /// Looks in the document and every same-origin iframe (recursively). A CSS selector clicks the
+    /// Looks in the document, its open shadow roots and every same-origin iframe (recursively). A CSS selector clicks the
     /// first match; "js:<expression>" instead evaluates the expression in each frame's window until
     /// one returns truthy, for canvas-drawn buttons (e.g. PlayCanvas UI) that have no element.
     private static let testClickSource = """
@@ -187,13 +187,22 @@ final class HoloWebState: NSObject {
       }
     };
     collect(window);
+    // Open shadow roots too (e.g. Needle's <needle-menu> buttons).
+    const find = (root) => {
+      const hit = root.querySelector(selector);
+      if (hit) return hit;
+      for (const el of root.querySelectorAll("*")) {
+        if (el.shadowRoot) { const inner = find(el.shadowRoot); if (inner) return inner; }
+      }
+      return null;
+    };
     for (const win of windows) {
       try {
         if (selector.startsWith("js:")) {
           if (new win.Function("return (" + selector.slice(3) + ");")()) return true;
           continue;
         }
-        const el = win.document.querySelector(selector);
+        const el = find(win.document);
         if (el) { el.click(); return true; }
       } catch (_) {}
     }
