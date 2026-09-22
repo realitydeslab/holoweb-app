@@ -44,7 +44,9 @@ struct ContentView: View {
     /// physical landscape bottom edge and centre), and the page underneath stays touchable.
     private var controls: some View {
         VStack(spacing: 18) {
-            if state.phase != .browsing {
+            // All four slots in every state, each icon in a fixed frame: the capsule never changes size
+            // (entering AR or switching mono/stereo). AR-only buttons are disabled while browsing.
+            Group {
                 Button {
                     state.setMode(state.mode == .mono ? .stereo : .mono)
                 } label: {
@@ -58,16 +60,21 @@ struct ContentView: View {
                     Label(state.phase.isVR ? "Exit VR" : "Exit AR", systemImage: "xmark")
                 }
             }
-            Button {
-                state.goHome()
-            } label: {
-                Label("Gallery", systemImage: "square.grid.2x2")
+            .disabled(state.phase == .browsing)
+            .frame(width: 28, height: 28)
+            Group {
+                Button {
+                    state.goHome()
+                } label: {
+                    Label("Gallery", systemImage: "square.grid.2x2")
+                }
+                Button {
+                    state.reload()
+                } label: {
+                    Label("Reload", systemImage: "arrow.clockwise")
+                }
             }
-            Button {
-                state.reload()
-            } label: {
-                Label("Reload", systemImage: "arrow.clockwise")
-            }
+            .frame(width: 28, height: 28)
         }
         .labelStyle(.iconOnly)
         .font(.title3)
