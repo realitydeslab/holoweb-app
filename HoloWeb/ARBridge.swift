@@ -60,6 +60,7 @@ final class ARBridge: NSObject {
     var imagesRequested = false
     let imageTracker = ImageTracker()
     var lastImagesLog: TimeInterval = 0
+    var lastDiagnostics: TimeInterval = 0
     /// Last `onVisibility` state sent this session.
     var visibility = "visible"
     /// Anchors the page created, by identifier. Held directly so removal never depends on

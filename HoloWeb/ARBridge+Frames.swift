@@ -22,6 +22,9 @@ extension ARBridge: ARSessionDelegate {
         nonisolated(unsafe) let frame = frame
         MainActor.assumeIsolated {
             self.stampPlaneUpdates(frame)
+            #if DEBUG
+            self.logDiagnostics(frame)
+            #endif
             self.push(frame)
         }
     }
@@ -153,6 +156,31 @@ extension ARBridge: ARSessionDelegate {
         statsFrames = 0
         lastStatsTime = frame.timestamp
     }
+
+    #if DEBUG
+    /// HOLOWEB_AR_DIAG=1: once a second, what ARKit sees (tracking, mapping, feature points,
+    /// depth, anchors by type and the running configuration's plane detection).
+    private func logDiagnostics(_ frame: ARFrame) {
+        guard Self.diagnosticsEnabled, frame.timestamp - lastDiagnostics >= 1 else { return }
+        lastDiagnostics = frame.timestamp
+        let tracking: String
+        switch frame.camera.trackingState {
+        case .normal: tracking = "normal"
+        case .notAvailable: tracking = "notAvailable"
+        case .limited(let reason): tracking = "limited(\(reason))"
+        }
+        let mapping = ["notAvailable", "limited", "extending", "mapped"][min(frame.worldMappingStatus.rawValue, 3)]
+        var byType: [String: Int] = [:]
+        for anchor in frame.anchors { byType[String(describing: type(of: anchor)), default: 0] += 1 }
+        let anchors = byType.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ",")
+        let planes = (session.configuration as? ARWorldTrackingConfiguration)?.planeDetection.rawValue ?? 0
+        print("[diag] t=\(String(format: "%.1f", frame.timestamp)) tracking=\(tracking) mapping=\(mapping) "
+              + "features=\(frame.rawFeaturePoints?.points.count ?? 0) depth=\(frame.sceneDepth != nil || frame.smoothedSceneDepth != nil) "
+              + "planeDetection=\(planes) anchors=[\(anchors)]")
+    }
+
+    private static let diagnosticsEnabled = ProcessInfo.processInfo.environment["HOLOWEB_AR_DIAG"] != nil
+    #endif
 
     private func pushAnchorsIfNeeded(now: TimeInterval) {
         guard anchorsDirty, now - lastAnchorsSent >= 0.1 else { return }

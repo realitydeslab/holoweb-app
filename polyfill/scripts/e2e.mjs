@@ -17,7 +17,7 @@ import { mimicWKWebView, runGlobalsChecks } from './e2e-wkwebview.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const shotDir = process.env.HOLOWEB_E2E_SHOTS ?? join(root, 'test-results');
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.map': 'application/json', '.png': 'image/png' };
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.map': 'application/json', '.png': 'image/png', '.css': 'text/css', '.jpg': 'image/jpeg' };
 const CDN = /^https:\/\/cdn\.jsdelivr\.net\/npm\/three@0\.186\.0\/(.*)$/;
 
 const server = createServer(async (req, res) => {

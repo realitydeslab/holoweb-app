@@ -16,4 +16,7 @@ done
 # example assets (image-tracking marker, 0.15 m wide)
 mkdir -p "$WEB/examples/assets"
 cp examples/assets/* "$WEB/examples/assets/"
-ls -l "$WEB/holoweb-polyfill.js" "$WEB/examples" "$WEB/examples/assets"
+# three.js r186 AR examples with local three + assets (offline; scripts/vendor-threejs.mjs)
+mkdir -p "$WEB/examples/threejs"
+cp -R examples/threejs/. "$WEB/examples/threejs/"
+ls -l "$WEB/holoweb-polyfill.js" "$WEB/examples" "$WEB/examples/assets" "$WEB/examples/threejs"

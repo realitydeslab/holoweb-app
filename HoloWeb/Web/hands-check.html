@@ -15,11 +15,11 @@ const check = (name, ok, detail = "") => console.log(`[check] ${ok ? "PASS" : "F
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 const calls = [];  // { at, hands }
-let camera = null;
+let camera = null, cameraFull = null;
 const bridge = {
-  onFrame(t, mode, transform) { camera = transform; },
+  onFrame(t, mode, transform) { camera = transform; cameraFull = transform; },
   onPlanes() {}, onAnchors() {}, onEnvironment() {}, onVisibility() {},
-  onHands(update) { calls.push({ at: performance.now(), t: update.t, hands: update.hands, camera: camera && camera.slice(12, 15) }); },
+  onHands(update) { calls.push({ at: performance.now(), t: update.t, hands: update.hands, camera: camera && camera.slice(12, 15), pose: cameraFull && cameraFull.slice() }); },
   onSessionEnded(reason) { log("sessionEnded", reason); },
 };
 window.__holoweb = bridge;
@@ -61,6 +61,13 @@ const dist = (j, a, b) => Math.hypot(j[3 * a] - j[3 * b], j[3 * a + 1] - j[3 * b
     const last = withHands[withHands.length - 1];
     const sides = {}; all.forEach(h => sides[h.handedness] = (sides[h.handedness] || 0) + 1);
     log("handedness counts:", JSON.stringify(sides), "(right hand only in view should read mostly right)");
+    // Depth spread along the camera's view axis (-Z of the pose): for a flat photo on a screen this
+    // is the screen's tilt over the hand, not finger depth noise.
+    if (last.pose) {
+      const f = [-last.pose[8], -last.pose[9], -last.pose[10]], c = last.pose.slice(12, 15), j = last.hands[0].joints;
+      const d = Array.from({ length: 21 }, (_, i) => (j[3 * i] - c[0]) * f[0] + (j[3 * i + 1] - c[1]) * f[1] + (j[3 * i + 2] - c[2]) * f[2]);
+      log("joint view depth m: min", Math.min(...d).toFixed(3), "max", Math.max(...d).toFixed(3), "spread", (Math.max(...d) - Math.min(...d)).toFixed(3));
+    }
     if (last.camera) log("wrist distance from camera m:", Math.hypot(last.hands[0].joints[0] - last.camera[0], last.hands[0].joints[1] - last.camera[1], last.hands[0].joints[2] - last.camera[2]).toFixed(3));
   }
   await native({ type: "endSession" });

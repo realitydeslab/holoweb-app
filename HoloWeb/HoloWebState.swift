@@ -268,7 +268,7 @@ final class HoloWebState: NSObject {
             configuration.automaticImageScaleEstimationEnabled = true
             print("[bridge] image tracking n=\(detectionImages.count)")
         }
-        print("[state] ARKit run frameSemantics=\(configuration.frameSemantics.rawValue) sceneReconstruction=\(configuration.sceneReconstruction.rawValue)")
+        print("[state] ARKit run planeDetection=\(configuration.planeDetection.rawValue) frameSemantics=\(configuration.frameSemantics.rawValue) sceneReconstruction=\(configuration.sceneReconstruction.rawValue)")
         session.run(configuration)
         isARRunning = true
     }

@@ -8,6 +8,8 @@
 //                             2K HDR default environment from the network and its load callback overwrites
 //                             scene.environment if it finishes after estimationstart (a race in the example).
 // Pages: test/fixtures/threejs-r186 served at their threejs.org URLs (HOLOWEB_E2E_LIVE=1: live pages).
+// Bundled: examples/threejs/<name>.html (what the app ships, scripts/vendor-threejs.mjs) from the local
+// server with every other request aborted, so the device copies are proven to run offline.
 // three.js build/jsm come from node_modules/three (same r186). The bundle is injected at document start
 // like the app does. The page's scene/renderer are observed through three's __THREE_DEVTOOLS__ hook.
 import { readFile, writeFile } from 'node:fs/promises';
@@ -19,20 +21,29 @@ const LOCAL = [
   [/^https:\/\/threejs\.org\/examples\/jsm\/(.*)$/, 'node_modules/three/examples/jsm'],
 ];
 
-async function openExample({ browser, root }, name, problems) {
+async function openExample({ browser, root, base }, name, problems, bundled = false) {
   const context = await browser.newContext({ viewport: { width: 844, height: 390 }, deviceScaleFactor: 2 });
   const page = await context.newPage();
   page.on('console', (m) => {
     if (m.type() === 'error') problems.push(`console.error: ${m.text().slice(0, 200)}`);
   });
   page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
-  for (const [pattern, dir] of LOCAL) {
+  if (bundled) {
+    await page.route(
+      (url) => !url.href.startsWith(base),
+      (route) => {
+        problems.push(`network request from the bundled page: ${route.request().url()}`);
+        return route.abort();
+      },
+    );
+  }
+  for (const [pattern, dir] of bundled ? [] : LOCAL) {
     await page.route(pattern, async (route) => {
       const file = route.request().url().match(pattern)[1].split('?')[0];
       await route.fulfill({ body: await readFile(join(root, dir, file)), contentType: 'text/javascript' });
     });
   }
-  if (!process.env.HOLOWEB_E2E_LIVE) {
+  if (!process.env.HOLOWEB_E2E_LIVE && !bundled) {
     await page.route(`${SITE}/examples/${name}.html`, async (route) =>
       route.fulfill({ body: await readFile(join(root, 'test/fixtures/threejs-r186', `${name}.html`)), contentType: 'text/html' }),
     );
@@ -43,7 +54,7 @@ async function openExample({ browser, root }, name, problems) {
     window.__THREE_DEVTOOLS__.addEventListener('observe', (e) => window.__observed.push(e.detail));
   });
   await page.addInitScript({ path: join(root, 'dist/holoweb-polyfill.js') });
-  await page.goto(`${SITE}/examples/${name}.html`, { waitUntil: 'load', timeout: 30000 });
+  await page.goto(bundled ? `${base}/examples/threejs/${name}.html` : `${SITE}/examples/${name}.html`, { waitUntil: 'load', timeout: 30000 });
   await page.locator('#ARButton', { hasText: 'START AR' }).click({ timeout: 10000 });
   await page.waitForFunction(() => Boolean(window.__holoweb.bridge.device.activeSession), null, { timeout: 10000 });
   return { context, page };
@@ -121,22 +132,24 @@ const CHECKS = {
 
 export async function runThreeOfficialChecks(env) {
   let failures = 0;
-  for (const name of Object.keys(CHECKS)) {
+  const runs = Object.keys(CHECKS).flatMap((name) => [[name, false], [name, true]]);
+  for (const [name, bundled] of runs) {
     const problems = [];
+    const label = bundled ? `examples/threejs/${name}.html (bundled r186, offline)` : `threejs.org/examples/${name}.html (r186, ${process.env.HOLOWEB_E2E_LIVE ? 'live' : 'fixture'})`;
     let context;
     try {
-      const opened = await openExample(env, name, problems);
+      const opened = await openExample(env, name, problems, bundled);
       context = opened.context;
       const detail = await CHECKS[name](opened.page, problems);
-      await writeFile(join(env.shotDir, `threejs-${name}.png`), await opened.page.screenshot());
-      console.log(`${problems.length ? 'FAIL' : 'PASS'} threejs.org/examples/${name}.html (r186, ${process.env.HOLOWEB_E2E_LIVE ? 'live' : 'fixture'}): ${detail}`);
+      await writeFile(join(env.shotDir, `threejs-${name}${bundled ? '-bundled' : ''}.png`), await opened.page.screenshot());
+      console.log(`${problems.length ? 'FAIL' : 'PASS'} ${label}: ${detail}`);
     } catch (err) {
       problems.push(String(err.message ?? err).split('\n')[0]);
-      console.log(`FAIL threejs.org/examples/${name}.html`);
+      console.log(`FAIL ${label}`);
     }
     for (const p of problems) console.log(`    ${p}`);
     if (problems.length) failures++;
     await context?.close();
   }
-  return { failures, cases: Object.keys(CHECKS).length };
+  return { failures, cases: runs.length };
 }

@@ -1,0 +1,38 @@
+<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="margin:0;background:transparent">
+<script>
+// Through the polyfill: the LiDAR features the ready reply's capabilities unlock must be
+// grantable as *required* features, and their data must arrive (detectedMeshes, hand input).
+const log = (...a) => console.log("[features-check] " + a.join(" "));
+const check = (name, ok, detail = "") => console.log(`[check] ${ok ? "PASS" : "FAIL"} ${name} ${detail}`);
+(async () => {
+  const supported = await navigator.xr.isSessionSupported("immersive-ar");
+  check("xr.immersive-ar-supported", supported === true, String(supported));
+  let session;
+  try {
+    session = await navigator.xr.requestSession("immersive-ar", { requiredFeatures: ["hand-tracking", "mesh-detection"] });
+  } catch (e) {
+    check("xr.required-hand-mesh", false, e.name + ": " + e.message);
+    return;
+  }
+  const enabled = [...(session.enabledFeatures || [])];
+  check("xr.required-hand-mesh", enabled.includes("hand-tracking") && enabled.includes("mesh-detection"), enabled.join(","));
+  const canvas = document.createElement("canvas"); document.body.appendChild(canvas);
+  const gl = canvas.getContext("webgl2", { xrCompatible: true, alpha: true });
+  session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+  const local = await session.requestReferenceSpace("local");
+  let frames = 0, maxMeshes = 0;
+  session.requestAnimationFrame(function onFrame(time, frame) {
+    frames++;
+    maxMeshes = Math.max(maxMeshes, frame.detectedMeshes ? frame.detectedMeshes.size : -1);
+    if (frames === 600) {
+      log("frames:", frames, "max detectedMeshes:", maxMeshes);
+      check("xr.detected-meshes", maxMeshes > 0, maxMeshes < 0 ? "frame.detectedMeshes missing" : `max ${maxMeshes}`);
+      session.end().then(() => log("DONE"));
+      return;
+    }
+    session.requestAnimationFrame(onFrame);
+  });
+})().catch(e => { log("ERROR", e.message); check("xr.features-script", false, e.message); });
+</script>
+</body></html>

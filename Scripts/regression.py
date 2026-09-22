@@ -233,7 +233,7 @@ def mesh_run(report: Report, device: str, seconds: int = 22) -> None:
     log = launch(device, {"HOLOWEB_PAGE": "mesh-check.html"}, seconds)
     seen = {m.group(2): (m.group(1) == "PASS", m.group(3).strip())
             for m in re.finditer(r"\[check\] (PASS|FAIL) (\S+) ?([^\n]*)", log)}
-    run = re.search(r"\[state\] ARKit run frameSemantics=\d+ sceneReconstruction=(\d+)", log)
+    run = re.search(r"\[state\] ARKit run (?:planeDetection=\d+ )?frameSemantics=\d+ sceneReconstruction=(\d+)", log)
     report.add("device.mesh.reconstruction-enabled", bool(run) and run.group(1) != "0",
                run.group(0) if run else "no [state] ARKit run line")
     failures = re.findall(r"\[bridge\] call failed onMeshes[^\n]*", log)
@@ -294,6 +294,9 @@ def _stage_device(report: Report, device: str) -> None:
         "bridge.unknown-type-rejected", "bridge.end-session-stops-frames"])
     page_checks(report, device, "xr-anchor-check.html", 16, [
         "xr.anchor-created", "xr.anchor-tracked-pose", "xr.anchor-deleted"])
+    # Required LiDAR features through the polyfill (gated by the ready reply's capabilities).
+    page_checks(report, device, "xr-features-check.html", 22, [
+        "xr.immersive-ar-supported", "xr.required-hand-mesh", "xr.detected-meshes"])
     # Plane checks need real surfaces in view; a phone lying still on a desk sees none.
     page_checks(report, device, "env-plane-check.html", 30, [
         "env.received", "env.shape", "env.not-blank", "env.rate", "planes.received",
