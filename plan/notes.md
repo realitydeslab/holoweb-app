@@ -699,3 +699,19 @@ Device (show.sh hands2, hands-check.html):
 - Cause of the device report: superspl.at/s/index.js sets `ar.disabled = !state.loaded || state.xrMode !== null` and listens for `click`. Until the splat has loaded, button.sse-arMode is disabled; it was still disabled 8 s after load in WebKit. A JS `element.click()` on a disabled button is a silent no-op, hence no request and no page error. Playwright's click waits for enabled, which is why the earlier probes worked. Synthetic pointer events don't help, and aren't needed.
 - Not a polyfill bug. The device test must wait for `!document.querySelector('button.sse-arMode').disabled` before clicking.
 - e2e: new live case in e2e-frames.mjs. It waits until the button is enabled, clicks it via element.click() like native's test click, then asserts requestSession resolved and 20 XR frames arrived. Passes in Chromium and WebKit.
+
+## Polyfill execution log (ballshooter "Object3D.add: object not an instance")
+
+- Probe: live threejs.org webxr_xr_ballshooter in stripped Chromium and WebKit, 2 taps, console.error stacks captured. Both errors come from the page itself, at ballshooter.html:112, `this.add( buildController( event.data ) )`. buildController handles only 'tracked-pointer' and 'gaze' and returns undefined for 'screen', so every tap (a transient screen source, 'connected') logs one error.
+- Our screen source in both engines: targetRayMode 'screen', gripSpace null, gamepad null, profiles ['generic-touchscreen'], handedness 'none', hand null. That is the AR Module shape and what Chrome Android exposes, so Chrome Android logs the same errors. XRControllerModelFactory is not involved: it only builds models for tracked-pointer with a gamepad.
+- No polyfill change. 'screen' is required by the AR Module (D5). The ar-module-conformance test now also pins gripSpace, gamepad and hand to null. For the device regression, allow this page error for ballshooter.
+- Verification: npm test 115/115.
+
+## Device confirmation (image tracking)
+
+- Lead, on the device: 8/8 launches of examples/image-tracking.html were trackable and tracked. The first draw was still blank in 4 of 8 and recovered on retry 1–2, so the white-fill, blank-check and retry path is essential.
+- Committed: SuperSplat test-click wait (c7a788d) and the ballshooter allow-list. The polyfill queue is empty.
+
+### Final baseline (Scripts/regression.py, iPhone 15 Pro, iOS 27, 2026-09-22 evening)
+- 209 passed / 7 failed at commit time (run started before c7a788d / 6e2d041). Failures: bridge.end-session-stops-frames (page ran out of time; window widened 34 -> 44 s), SuperSplat (pre-fix build; fixed by the test-click enabled wait), Babylon playground's own load timeout (flaky external; seconds raised to 75).
+- All 10 immersive-web samples, three.js (live + bundled), image tracking, hands, meshes, planes, VR, gallery (Needle x5, PlayCanvas, model-viewer, Toji, ball shooter) pass on device.

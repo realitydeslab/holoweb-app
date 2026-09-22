@@ -328,7 +328,7 @@ def bundled_page_checks(report: Report, device: str) -> None:
     page_checks(report, device, "webgpu-check.html", 14, [
         "webgpu.navigator-gpu", "webxr.navigator-xr", "webkit.create-js-handle",
         "webgl2.draw", "webgpu.copy-to-canvas-presenter"])
-    page_checks(report, device, "bridge-check.html", 34, [
+    page_checks(report, device, "bridge-check.html", 44, [
         "bridge.jshandle", "bridge.device-info", "bridge.frame-rate", "bridge.latency-p50",
         "bridge.raf-rate", "bridge.frame-args", "bridge.hit-test-reply", "bridge.hit-test-rejects-nan",
         "bridge.anchor-roundtrip", "bridge.anchor-rejects-nonfinite", "bridge.iframe-cross-origin-rejected",

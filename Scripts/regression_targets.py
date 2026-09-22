@@ -103,7 +103,7 @@ GROUPS: dict[str, list[Target]] = {
                click="#default-ar-button"),
         # Babylon's WebXR default experience: <button class="babylonVRicon"> in .xr-button-overlay.
         Target("gallery-babylon", "https://playground.babylonjs.com/full.html#GG06BQ#97",
-               click=".xr-button-overlay button", seconds=40),
+               click=".xr-button-overlay button", seconds=75),
         # three.js XRButton offers immersive-ar first.
         Target("gallery-ballshooter", THREE + "webxr_xr_ballshooter.html", click="#XRButton",
                # The page's buildController() returns undefined for screen (tap) input sources, same in Chrome Android.
