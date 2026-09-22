@@ -95,7 +95,8 @@ final class HoloWebState: NSObject {
         webView.isOpaque = false
         webView.backgroundColor = .clear
         webView.scrollView.backgroundColor = .clear
-        webView.scrollView.isScrollEnabled = false
+        // Browsing scrolls like a normal page; scrolling is turned off only while an XR session runs.
+        webView.scrollView.isScrollEnabled = true
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         #if DEBUG
         webView.isInspectable = true
@@ -125,6 +126,7 @@ final class HoloWebState: NSObject {
                           detectionImages: Set<ARReferenceImage> = []) {
         isInXRSession = true
         isVRSession = vr
+        webView.scrollView.isScrollEnabled = false
         startARSession(features: features, detectionImages: detectionImages)
         print("[state] phase -> \(phase)")
         #if DEBUG
@@ -137,6 +139,7 @@ final class HoloWebState: NSObject {
     func xrSessionEnded() {
         isInXRSession = false
         isVRSession = false
+        webView.scrollView.isScrollEnabled = true
         pauseARSession()
         if mode != .mono { setMode(.mono) }
         print("[state] phase -> \(phase)")

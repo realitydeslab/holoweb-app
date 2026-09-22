@@ -16,9 +16,10 @@ struct ContentView: View {
         ZStack {
             background
             WebViewRepresentable()
-            controls
         }
         .ignoresSafeArea()
+        // Controls stay inside the safe area so they never sit under the status bar or the notch.
+        .overlay(alignment: .top) { controls }
         .statusBarHidden(state.phase != .browsing)
         .onDisappear { state.xrSessionEnded() }
     }
@@ -34,40 +35,44 @@ struct ContentView: View {
         }
     }
 
+    /// Compact icon group in the top-right corner only, so the rest of the page stays visible and
+    /// touchable (the page underneath scrolls while browsing).
     private var controls: some View {
         VStack {
-            HStack(spacing: 18) {
+            HStack {
                 Spacer()
-                if state.phase != .browsing {
-                    Button {
-                        state.setMode(state.mode == .mono ? .stereo : .mono)
-                    } label: {
-                        Label(state.mode == .mono ? "Stereo" : "Mono",
-                              systemImage: state.mode == .mono ? "vision.pro" : "iphone")
+                HStack(spacing: 18) {
+                    if state.phase != .browsing {
+                        Button {
+                            state.setMode(state.mode == .mono ? .stereo : .mono)
+                        } label: {
+                            Label(state.mode == .mono ? "Stereo" : "Mono",
+                                  systemImage: state.mode == .mono ? "vision.pro" : "iphone")
+                        }
+                        .accessibilityHint("Switch between handheld AR and HoloKit stereo")
+                        Button {
+                            state.exitXR()
+                        } label: {
+                            Label(state.phase.isVR ? "Exit VR" : "Exit AR", systemImage: "xmark")
+                        }
                     }
-                    .accessibilityHint("Switch between handheld AR and HoloKit stereo")
                     Button {
-                        state.exitXR()
+                        state.goHome()
                     } label: {
-                        Label(state.phase.isVR ? "Exit VR" : "Exit AR", systemImage: "xmark")
+                        Label("Gallery", systemImage: "square.grid.2x2")
+                    }
+                    Button {
+                        state.reload()
+                    } label: {
+                        Label("Reload", systemImage: "arrow.clockwise")
                     }
                 }
-                Button {
-                    state.goHome()
-                } label: {
-                    Label("Gallery", systemImage: "square.grid.2x2")
-                }
-                Button {
-                    state.reload()
-                } label: {
-                    Label("Reload", systemImage: "arrow.clockwise")
-                }
+                .labelStyle(.iconOnly)
+                .font(.title3)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(.ultraThinMaterial, in: Capsule())
             }
-            .labelStyle(.iconOnly)
-            .font(.title3)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(.ultraThinMaterial, in: Capsule())
             .padding(.top, 12)
             .padding(.horizontal, 16)
             Spacer()
