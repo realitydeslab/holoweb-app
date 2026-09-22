@@ -690,3 +690,12 @@ Device (show.sh hands2, hands-check.html):
 - Tests: test/image-snapshot.test.ts covers willReadFrequently plus the white fill, blank then recovered on retry 1, blank x4 then untrackable, the first pass synchronous, and the earlier fallback and error cases.
 - Verification: npm test 115/115; e2e 40/40 (Chromium + WebKit image cases); WebKit full 37/37.
 - Image-tracking blank-snapshot fix (a1f6bf5) on device: 8/8 launches of examples/image-tracking.html scored trackable and tracked the on-screen marker; the first draw came back blank in 4/8 and was recovered on retry 1–2. The WKWebView canvas readback issue is real and frequent; the retry path is load-bearing.
+
+## Polyfill execution log (SuperSplat: no requestSession on device)
+
+- I recorded every navigator.xr call (isSessionSupported, requestSession; offerSession is absent) in stripped Chromium and in WebKit with the iPhone WKWebView user agent.
+  - At load the page calls isSessionSupported for inline, immersive-vr and immersive-ar; all return true.
+  - A click calls `requestSession('immersive-ar', {requiredFeatures:['local-floor'], optionalFeatures:['light-estimation','hit-test','hand-tracking']})`, and the session starts. Nothing is rejected.
+- Cause of the device report: superspl.at/s/index.js sets `ar.disabled = !state.loaded || state.xrMode !== null` and listens for `click`. Until the splat has loaded, button.sse-arMode is disabled; it was still disabled 8 s after load in WebKit. A JS `element.click()` on a disabled button is a silent no-op, hence no request and no page error. Playwright's click waits for enabled, which is why the earlier probes worked. Synthetic pointer events don't help, and aren't needed.
+- Not a polyfill bug. The device test must wait for `!document.querySelector('button.sse-arMode').disabled` before clicking.
+- e2e: new live case in e2e-frames.mjs. It waits until the button is enabled, clicks it via element.click() like native's test click, then asserts requestSession resolved and 20 XR frames arrived. Passes in Chromium and WebKit.

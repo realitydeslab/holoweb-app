@@ -164,7 +164,9 @@ def third_party_run(report: Report, device: str, target: Target) -> None:
     that `target.features` were requested, and that each `target.expect` line was logged. Page
     errors matching `target.ignore_errors` (a regex) are the page's own, intended behaviour."""
     where = {"HOLOWEB_URL": target.url} if "://" in target.url else {"HOLOWEB_PAGE": target.url}
-    log = launch(device, {**where, "HOLOWEB_TEST_CLICK": target.click}, target.seconds)
+    # Let the page's AR control become enabled (large assets) for most of the run before giving up.
+    wait = str(max(6, target.seconds - 10))
+    log = launch(device, {**where, "HOLOWEB_TEST_CLICK": target.click, "HOLOWEB_TEST_CLICK_WAIT": wait}, target.seconds)
     name = f"device.{target.label}"
     features, expect, human, ignore_errors = target.features, target.expect, target.human, target.ignore_errors
     clicked = re.search(r"\[test\] (clicked|no element) (.*)", log)

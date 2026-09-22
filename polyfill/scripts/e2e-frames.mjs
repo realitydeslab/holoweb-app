@@ -7,12 +7,16 @@
 // 3. modelviewer.dev augmented-reality examples (network, skipped offline): the default AR button in a
 //    <model-viewer> shadow root enters WebXR AR and model-viewer places the model (device bug: its
 //    XRRay({x,y,z}) direction without `w` threw; XRRayDirectionInit defaults w to 0).
+// 4. SuperSplat viewer (network, skipped offline): button.sse-arMode stays `disabled` until the splat has
+//    loaded (a click before that is a silent no-op: the device "no requestSession" report). After it is
+//    enabled, a plain element.click() (like native's test click) must reach requestSession and start AR.
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const CDN = /^https:\/\/cdn\.jsdelivr\.net\/npm\/three@0\.186\.0\/(.*)$/;
 const AFRAME = 'https://aframe.io/aframe/examples/showcase/model-viewer/';
 const MODEL_VIEWER = 'https://modelviewer.dev/examples/augmentedreality/';
+const SUPERSPLAT = 'https://superspl.at/s?id=5c0f892e&webgl';
 
 async function newPage(browser, root, problems, { strictConsole = true } = {}) {
   const context = await browser.newContext({ viewport: { width: 844, height: 390 }, deviceScaleFactor: 2 });
@@ -147,7 +151,58 @@ async function modelViewerCase({ browser, root, shotDir }) {
   return problems.length ? 1 : 0;
 }
 
+/** Record navigator.xr calls and their outcome (after the bundle installs navigator.xr). */
+function recordXRCalls() {
+  window.__xrCalls = [];
+  const xr = navigator.xr;
+  for (const m of ['isSessionSupported', 'requestSession']) {
+    const f = xr[m];
+    xr[m] = function (...args) {
+      const entry = { m, mode: args[0], init: args[1] ? JSON.stringify(args[1], (k, v) => (v instanceof Element ? `<${v.tagName}>` : v)) : undefined };
+      window.__xrCalls.push(entry);
+      const p = f.apply(this, args);
+      p.then(() => (entry.ok = true), (e) => (entry.error = `${e.name}: ${e.message}`));
+      return p;
+    };
+  }
+}
+
+async function superSplatCase({ browser, root, shotDir }) {
+  const problems = [];
+  const { context, page } = await newPage(browser, root, problems, { strictConsole: false });
+  page.on('console', (m) => m.type() === 'error' && /XR|session|HoloWeb/i.test(m.text()) && problems.push(`console.error: ${m.text().slice(0, 200)}`));
+  const label = 'superspl.at viewer (live) [button.sse-arMode via element.click() once enabled]';
+  try {
+    await page.addInitScript({ path: join(root, 'dist/holoweb-polyfill.js') });
+    await page.addInitScript(recordXRCalls);
+    try {
+      await page.goto(SUPERSPLAT, { waitUntil: 'load', timeout: 45000 });
+    } catch (err) {
+      console.log(`SKIP ${label} (network): ${String(err.message).split('\n')[0]}`);
+      await context.close();
+      return 0;
+    }
+    await page.waitForFunction(() => document.querySelector('button.sse-arMode')?.disabled === false, null, { timeout: 60000 });
+    await page.evaluate(() => document.querySelector('button.sse-arMode').click());
+    await page.waitForFunction(() => Boolean(window.__holoweb.bridge.device.activeSession), null, { timeout: 10000 }).catch(() => undefined);
+    const calls = await page.evaluate(() => window.__xrCalls);
+    const request = calls.find((c) => c.m === 'requestSession');
+    if (!request) problems.push(`no requestSession; navigator.xr calls: ${JSON.stringify(calls)}`);
+    else if (!request.ok) problems.push(`requestSession ${request.error ?? 'pending'}: ${request.init}`);
+    const xr = await sampleXR(page.mainFrame());
+    if (xr.frames < 20) problems.push(`XR loop: ${JSON.stringify(xr)}`);
+    await writeFile(join(shotDir, 'supersplat-ar.png'), await page.screenshot());
+    console.log(`${problems.length ? 'FAIL' : 'PASS'} ${label}: requestSession(${request?.mode}, ${request?.init}) ok=${Boolean(request?.ok)}, XR frames=${xr.frames}`);
+  } catch (err) {
+    problems.push(String(err.message ?? err).split('\n')[0]);
+    console.log(`FAIL ${label}`);
+  }
+  for (const p of problems) console.log(`    ${p}`);
+  await context.close();
+  return problems.length ? 1 : 0;
+}
+
 export async function runFrameChecks(env) {
-  const failures = (await iframeCase(env)) + (await aframeCase(env)) + (await modelViewerCase(env));
-  return { failures, cases: 3 };
+  const failures = (await iframeCase(env)) + (await aframeCase(env)) + (await modelViewerCase(env)) + (await superSplatCase(env));
+  return { failures, cases: 4 };
 }

@@ -157,19 +157,22 @@ final class HoloWebState: NSObject {
     }
 
     /// Test aid: HOLOWEB_TEST_CLICK=<CSS selector | js:expression> clicks the first matching element
-    /// 2.5 s after each main-frame load, retrying up to 5 times at 1 s intervals (e.g. "#ARButton").
+    /// 2.5 s after each main-frame load, retrying every 1 s for HOLOWEB_TEST_CLICK_WAIT seconds
+    /// (default 6), e.g. "#ARButton". Disabled buttons count as not found, since a click on them is a
+    /// silent no-op (SuperSplat keeps its AR button disabled until the splat has loaded).
     func runTestClick() {
         guard let selector = ProcessInfo.processInfo.environment["HOLOWEB_TEST_CLICK"], !selector.isEmpty else { return }
         testClickTask?.cancel()
         testClickTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(2.5))
-            for attempt in 0...5 {
+            let attempts = max(1, Int(ProcessInfo.processInfo.environment["HOLOWEB_TEST_CLICK_WAIT"] ?? "") ?? 6)
+            for attempt in 0..<attempts {
                 guard !Task.isCancelled, let webView = self?.webView else { return }
                 let clicked = try? await webView.callAsyncJavaScript(
                     Self.testClickSource,
                     arguments: ["selector": selector], in: nil, contentWorld: .page) as? Bool
                 if clicked == true { return print("[test] clicked \(selector)") }
-                if attempt == 5 { return print("[test] no element \(selector)") }
+                if attempt == attempts - 1 { return print("[test] no element \(selector)") }
                 try? await Task.sleep(for: .seconds(1))
             }
         }
@@ -188,8 +191,9 @@ final class HoloWebState: NSObject {
     };
     collect(window);
     // Open shadow roots too (e.g. Needle's <needle-menu> buttons).
+    const enabled = (el) => !el.disabled && el.getAttribute("aria-disabled") !== "true";
     const find = (root) => {
-      const hit = root.querySelector(selector);
+      const hit = [...root.querySelectorAll(selector)].find(enabled);
       if (hit) return hit;
       for (const el of root.querySelectorAll("*")) {
         if (el.shadowRoot) { const inner = find(el.shadowRoot); if (inner) return inner; }
