@@ -7,8 +7,11 @@ import Vision
 
 /// 3D hand joints for `bridge.onHands` (plan/bridge_protocol.md, plan/samples_requirements.md G10).
 ///
-/// Vision finds 21 2D joints per hand in `ARFrame.capturedImage` (orientation `.up`: the buffer is
-/// in sensor orientation, the same frame as the intrinsics) on a serial background queue.
+/// Vision finds 21 2D joints per hand in `ARFrame.capturedImage` on a serial background queue. The
+/// buffer is in sensor orientation (upright for interface landscapeRight); Vision is told the
+/// orientation that makes it upright for the current interface orientation (a hand rotated 90 degrees
+/// is detected far less often), and its joints are mapped back to buffer coordinates, the frame of
+/// the depth map and the intrinsics.
 /// Handedness comes from hand geometry (see `firstPersonHandedness`), not Vision's chirality. Each
 /// joint is lifted to 3D with the LiDAR depth map: a 3x3 median of medium/high-confidence pixels,
 /// clamped to the palm depth +- 8 cm, since thin fingers often sample the background at their
@@ -47,7 +50,8 @@ final class HandTracker {
     private let memory = DepthMemory()
 
     /// Starts tracking `frame` if due and idle; `completion` runs on the main actor.
-    func submit(_ frame: ARFrame, completion: @escaping @MainActor @Sendable (Result) -> Void) {
+    func submit(_ frame: ARFrame, interfaceOrientation: UIInterfaceOrientation,
+                completion: @escaping @MainActor @Sendable (Result) -> Void) {
         let thermal = ProcessInfo.processInfo.thermalState
         guard !busy, thermal != .critical else { return }
         let interval = thermal == .serious ? 1.0 / 30 : 1.0 / 60
@@ -56,7 +60,8 @@ final class HandTracker {
         lastSubmit = frame.timestamp
         busy = true
         let depth = frame.smoothedSceneDepth ?? frame.sceneDepth
-        let input = Input(image: frame.capturedImage, depth: depth?.depthMap, confidence: depth?.confidenceMap,
+        let input = Input(image: frame.capturedImage, orientation: Self.visionOrientation(interfaceOrientation),
+                          depth: depth?.depthMap, confidence: depth?.confidenceMap,
                           intrinsics: frame.camera.intrinsics, resolution: frame.camera.imageResolution,
                           cameraTransform: frame.camera.transform, t: frame.timestamp * 1000)
         let memory = self.memory
@@ -74,12 +79,36 @@ final class HandTracker {
     /// What one tracking pass needs from an ARFrame. The pixel buffers are only read.
     private struct Input: @unchecked Sendable {
         let image: CVPixelBuffer
+        let orientation: CGImagePropertyOrientation
         let depth: CVPixelBuffer?
         let confidence: CVPixelBuffer?
         let intrinsics: simd_float3x3
         let resolution: CGSize
         let cameraTransform: simd_float4x4
         let t: Double
+    }
+
+    /// Orientation that makes the rear camera's sensor-oriented buffer upright for the interface.
+    nonisolated static func visionOrientation(_ interface: UIInterfaceOrientation) -> CGImagePropertyOrientation {
+        switch interface {
+        case .landscapeRight: .up
+        case .landscapeLeft: .down
+        case .portraitUpsideDown: .left
+        default: .right
+        }
+    }
+
+    /// A Vision point in the image as oriented by `orientation` (normalised, origin bottom-left) ->
+    /// the unrotated buffer (normalised, origin top-left). `.right`: the buffer is shown rotated
+    /// 90 degrees clockwise, so display (x, y-down) = (1 - by, bx).
+    nonisolated static func bufferPoint(_ p: CGPoint, orientation: CGImagePropertyOrientation) -> simd_float2 {
+        let x = Float(p.x), y = Float(p.y)
+        switch orientation {
+        case .down: return simd_float2(1 - x, y)
+        case .right: return simd_float2(1 - y, 1 - x)
+        case .left: return simd_float2(y, x)
+        default: return simd_float2(x, 1 - y)
+        }
     }
 
     /// Vision order: wrist; thumb CMC, MP, IP, tip; index/middle/ring/little MCP, PIP, DIP, tip.
@@ -98,7 +127,7 @@ final class HandTracker {
         let start = CACurrentMediaTime()
         let request = VNDetectHumanHandPoseRequest()
         request.maximumHandCount = 2
-        let handler = VNImageRequestHandler(cvPixelBuffer: input.image, orientation: .up)
+        let handler = VNImageRequestHandler(cvPixelBuffer: input.image, orientation: input.orientation)
         do {
             try handler.perform([request])
         } catch {
@@ -120,10 +149,11 @@ final class HandTracker {
         case .right: "right"
         default: "unknown"
         }
-        // Normalised, origin bottom-left -> normalised, origin top-left (same as the pixel buffer).
+        // Vision's oriented image (normalised, origin bottom-left) -> the pixel buffer (normalised,
+        // origin top-left).
         let image = jointNames.map { name -> simd_float2 in
             guard let p = points[name] else { return simd_float2(0.5, 0.5) }
-            return simd_float2(Float(p.location.x), 1 - Float(p.location.y))
+            return bufferPoint(p.location, orientation: input.orientation)
         }
         let confidence = jointNames.map { Double(points[$0]?.confidence ?? 0) }
         let sampled = image.enumerated().map { i, p in confidence[i] > 0 ? depth?.median3x3(at: p) : nil }
@@ -250,6 +280,10 @@ struct HandStats {
     var minPinch2D = Double.infinity
     var handResults = 0
     var tipDepthResults = 0
+    /// Longest wait between consecutive results that contain a hand (gaps over 1 s are the hand
+    /// leaving the view, not a hitch), and results dropped because two calls were in flight.
+    var maxHandGapMs = 0.0
+    var droppedInFlight = 0
 }
 
 extension ARBridge {
@@ -258,9 +292,19 @@ extension ARBridge {
     func pushHandsIfNeeded(_ frame: ARFrame) {
         guard handsRequested, !handTracker.busy else { return }
         let generation = pageGeneration
-        handTracker.submit(frame) { [weak self] result in
-            guard let self, self.streaming, self.handsRequested, self.pageGeneration == generation,
-                  self.handStats.inFlight < HandStats.maxInFlight else { return }
+        let orientation = webView.window?.windowScene?.effectiveGeometry.interfaceOrientation ?? .portrait
+        handTracker.submit(frame, interfaceOrientation: orientation) { [weak self] result in
+            guard let self, self.streaming, self.handsRequested, self.pageGeneration == generation else { return }
+            if !result.hands.isEmpty {
+                if let last = self.lastHandResultMs, result.t - last < 1000 {
+                    self.handStats.maxHandGapMs = max(self.handStats.maxHandGapMs, result.t - last)
+                }
+                self.lastHandResultMs = result.t
+            }
+            guard self.handStats.inFlight < HandStats.maxInFlight else {
+                self.handStats.droppedInFlight += 1
+                return
+            }
             let hands: [[String: Any]] = result.hands.map {
                 ["handedness": $0.handedness, "joints": $0.joints, "confidence": $0.confidence,
                  "depthValid": $0.depthValid, "visionChirality": $0.visionChirality]
@@ -283,9 +327,9 @@ extension ARBridge {
             let stats = self.handStats
             let sides = result.hands.map { "\($0.handedness):\($0.depthValid.nonzeroBitCount)/21" }.joined(separator: ",")
             let pinch = stats.handResults == 0 ? "" : String(
-                format: " handRate=%.1f pinchMin3D=%.3fm pinchMin2D=%.2f tipsDepth=%d/%d",
-                Double(stats.handResults) / elapsed, stats.minPinch3D, stats.minPinch2D,
-                stats.tipDepthResults, stats.handResults)
+                format: " handRate=%.1f maxGap=%.0fms dropped=%d pinchMin3D=%.3fm pinchMin2D=%.2f tipsDepth=%d/%d",
+                Double(stats.handResults) / elapsed, stats.maxHandGapMs, stats.droppedInFlight,
+                stats.minPinch3D, stats.minPinch2D, stats.tipDepthResults, stats.handResults)
             print(String(format: "[bridge] hands sent n=%d visionMs=%.1f rate=%.1f%@%@", result.hands.count,
                          stats.visionMs / Double(max(stats.results, 1)), Double(stats.results) / elapsed,
                          sides.isEmpty ? "" : " (\(sides) depth)", pinch))

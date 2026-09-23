@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <title>HoloWeb AR grab and stretch</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+      #overlay { position: absolute; inset: 0; pointer-events: none; font: 14px system-ui; color: #fff; text-shadow: 0 0 3px #000; }
+      #status { position: absolute; top: max(12px, env(safe-area-inset-top)); left: 12px; right: 12px; text-align: center; white-space: pre-line; }
+      #reset { position: absolute; bottom: 120px; left: 50%; transform: translateX(-50%); pointer-events: auto;
+               padding: 10px 18px; font: 600 15px system-ui; color: #fff; background: #0008; border: 1px solid #fff6; border-radius: 10px; }
+    </style>
+    <!-- In the app this is injected at document start; loading it first here does the same. -->
+    <script src="../holoweb-polyfill.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.webgpu.js",
+          "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.webgpu.js",
+          "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.tsl.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="overlay">
+      <div id="status">HoloWeb &middot; pinch the cube to grab it; pinch with the other hand to stretch it</div>
+      <button id="reset">Reset cube</button>
+    </div>
+    <script type="module">
+      // Hand interaction test: pinch (select from a hand input source) near the cube grabs it with that
+      // hand; a second hand pinching while the cube is held stretches it (uniform scale follows the
+      // distance between the two pinch points, the cube stays centred between them).
+      import * as THREE from 'three/webgpu';
+      import { ARButton } from 'three/addons/webxr/ARButton.js';
+      import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
+
+      const SIZE = 0.12; // cube edge, metres
+      const GRAB_MARGIN = 0.06; // how far outside the cube a pinch still grabs it (3D)
+      const RAY_MARGIN = 0.04; // camera ray through the pinch point may miss the cube by this much
+      const RELEASE_GRACE_MS = 200; // a pinch that re-closes within this keeps holding (pinch flicker)
+      const MIN_SCALE = 0.3;
+      const MAX_SCALE = 5;
+      const COLORS = { idle: 0x44aaff, hover: 0xffcc00, grab: 0x33dd66, stretch: 0xff44cc };
+
+      const status = (window.__grabStatus = { hands: [], pinching: {}, mode: 'idle', scale: 1, grabs: 0, stretches: 0, attempts: 0, misses: 0, graceSaves: 0, maxFrameMs: 0, longFrames: 0, errors: [] });
+      addEventListener('error', (e) => status.errors.push(String(e.message)));
+      addEventListener('unhandledrejection', (e) => status.errors.push(String(e.reason)));
+
+      const renderer = new THREE.WebGPURenderer({ antialias: true, alpha: true });
+      renderer.setPixelRatio(devicePixelRatio);
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.xr.enabled = true;
+      document.body.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.01, 20);
+      scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 3));
+      const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+      sun.position.set(0.5, 1, 0.5);
+      scene.add(sun);
+
+      const material = new THREE.MeshStandardMaterial({ color: COLORS.idle, roughness: 0.4, metalness: 0.1 });
+      const cube = new THREE.Mesh(new THREE.BoxGeometry(SIZE, SIZE, SIZE), material);
+      cube.visible = false;
+      scene.add(cube);
+
+      // Hands: three.js joint spheres plus a marker at each pinch point.
+      const factory = new XRHandModelFactory();
+      const hands = [0, 1].map((i) => {
+        const hand = renderer.xr.getHand(i);
+        hand.add(factory.createHandModel(hand, 'spheres'));
+        scene.add(hand);
+        const marker = new THREE.Mesh(new THREE.SphereGeometry(0.008), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+        marker.visible = false;
+        scene.add(marker);
+        hand.userData.marker = marker;
+        hand.addEventListener('connected', (e) => (hand.userData.inputSource = e.data));
+        hand.addEventListener('disconnected', () => (hand.userData.inputSource = null));
+        return hand;
+      });
+      const handFor = (source) => hands.find((h) => h.userData.inputSource === source);
+
+      /** Midpoint of thumb tip and index tip in world space, or null while the joints are not tracked. */
+      function pinchPoint(hand, out) {
+        const thumb = hand.joints?.['thumb-tip'];
+        const index = hand.joints?.['index-finger-tip'];
+        if (!thumb?.visible || !index?.visible) return null;
+        const a = thumb.getWorldPosition(new THREE.Vector3());
+        return index.getWorldPosition(out).add(a).multiplyScalar(0.5);
+      }
+      const cubeRadius = () => (SIZE / 2) * cube.scale.x * Math.SQRT2;
+      /** Distance from the cube centre to the ray from the camera through p (Infinity if the cube is behind). */
+      function rayMiss(p) {
+        const eye = renderer.xr.getCamera().getWorldPosition(new THREE.Vector3());
+        const dir = p.clone().sub(eye).normalize();
+        const toCube = cube.position.clone().sub(eye);
+        const along = toCube.dot(dir);
+        return along > 0 ? toCube.addScaledVector(dir, -along).length() : Infinity;
+      }
+      // Grab test: in 3D, or on screen (the camera ray through the pinch point passes the cube). Fingertip
+      // depth is mostly inferred from the palm, so aiming on screen is far more reliable than 3D contact.
+      const nearCube = (p) => p.distanceTo(cube.position) < cubeRadius() + GRAB_MARGIN || rayMiss(p) < cubeRadius() + RAY_MARGIN;
+
+      // Grab state: the hands holding the cube, in the order they grabbed it.
+      let holders = [];
+      let grab = null; // one hand: { offset } ; two hands: { d0, s0 }
+
+      function beginGrab() {
+        const points = holders.map((h) => pinchPoint(h, new THREE.Vector3()));
+        if (points.some((p) => !p)) return;
+        if (holders.length === 1) {
+          grab = { offset: cube.position.clone().sub(points[0]) };
+          status.mode = 'grab';
+          status.grabs++;
+        } else if (holders.length === 2) {
+          grab = { d0: Math.max(points[0].distanceTo(points[1]), 0.02), s0: cube.scale.x };
+          status.mode = 'stretch';
+          status.stretches++;
+        }
+      }
+
+      function placeCube() {
+        const xrCamera = renderer.xr.getCamera();
+        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(xrCamera.quaternion);
+        cube.position.copy(xrCamera.position).addScaledVector(forward, 0.4);
+        cube.quaternion.set(0, 0, 0, 1);
+        cube.scale.setScalar(1);
+        cube.visible = true;
+        holders = [];
+        grab = null;
+        status.mode = 'idle';
+      }
+      let needsPlacement = true;
+      document.getElementById('reset').addEventListener('click', () => (needsPlacement = true));
+      // A tap on the overlay button is not an XR select.
+      document.getElementById('overlay').addEventListener('beforexrselect', (e) => e.preventDefault());
+
+      document.body.appendChild(
+        ARButton.createButton(renderer, {
+          optionalFeatures: ['hand-tracking', 'dom-overlay', 'webgpu'],
+          domOverlay: { root: document.getElementById('overlay') },
+        }),
+      );
+
+      renderer.xr.addEventListener('sessionstart', () => {
+        needsPlacement = true;
+        const session = renderer.xr.getSession();
+        const pendingRelease = new Map(); // hand -> timeout id
+        session.addEventListener('selectstart', (e) => {
+          // Only hand input: a screen tap is a transient input source that three.js also routes to a hand slot.
+          const hand = e.inputSource.hand ? handFor(e.inputSource) : null;
+          if (!hand) return;
+          status.pinching[e.inputSource.handedness] = true;
+          if (pendingRelease.has(hand)) {
+            // re-pinched within the grace period: keep holding
+            clearTimeout(pendingRelease.get(hand));
+            pendingRelease.delete(hand);
+            status.graceSaves++;
+            return;
+          }
+          if (holders.includes(hand)) return;
+          const p = pinchPoint(hand, new THREE.Vector3());
+          // First hand must pinch at the cube; a second hand may pinch anywhere to stretch.
+          const hit = holders.length > 0 || (p && nearCube(p));
+          status.attempts++;
+          if (p) {
+            const eye = renderer.xr.getCamera().getWorldPosition(new THREE.Vector3());
+            console.log('[grab] try ' + JSON.stringify({
+              hand: e.inputSource.handedness, holders: holders.length, hit,
+              d3: +(p.distanceTo(cube.position) - cubeRadius()).toFixed(3),
+              rayMiss: +(rayMiss(p) - cubeRadius()).toFixed(3),
+              eyeToPinch: +p.distanceTo(eye).toFixed(3), eyeToCube: +cube.position.distanceTo(eye).toFixed(3),
+            }));
+          }
+          if (!hit || holders.length >= 2) {
+            status.misses++;
+            return;
+          }
+          holders.push(hand);
+          beginGrab();
+        });
+        session.addEventListener('selectend', (e) => {
+          if (!e.inputSource.hand) return;
+          status.pinching[e.inputSource.handedness] = false;
+          const hand = handFor(e.inputSource);
+          if (!holders.includes(hand)) return;
+          // Release after a short grace period, so a flickering pinch does not drop the cube.
+          pendingRelease.set(hand, setTimeout(() => {
+            pendingRelease.delete(hand);
+            holders = holders.filter((h) => h !== hand);
+            grab = null;
+            status.mode = 'idle';
+            if (holders.length) beginGrab(); // back to a one-hand grab with the remaining hand
+          }, RELEASE_GRACE_MS));
+        });
+        // Live readout for hand-in-the-loop device tests (forwarded to the native console).
+        setInterval(() => {
+          console.log('[grab] ' + JSON.stringify(status));
+          status.maxFrameMs = 0; // per-second window
+          status.longFrames = 0;
+        }, 1000);
+      });
+
+      const statusEl = document.getElementById('status');
+      const p0 = new THREE.Vector3();
+      const p1 = new THREE.Vector3();
+      let lastTime = 0;
+      renderer.setAnimationLoop((time, frame) => {
+        if (frame) {
+          // Render hitch diagnostics: longest frame and frames over 25 ms in the current second.
+          const now = performance.now(); // wall clock: XR frame times would hide JS stalls
+          if (lastTime) {
+            const dt = now - lastTime;
+            status.maxFrameMs = Math.max(status.maxFrameMs, Math.round(dt));
+            if (dt > 25) status.longFrames++;
+          }
+          lastTime = now;
+          if (needsPlacement) {
+            placeCube();
+            needsPlacement = false;
+          }
+          const session = renderer.xr.getSession();
+          status.hands = [...session.inputSources].filter((s) => s.hand).map((s) => s.handedness);
+
+          // Pinch markers: white = tracked, green = pinching.
+          let hover = false;
+          for (const hand of hands) {
+            const marker = hand.userData.marker;
+            const p = hand.userData.inputSource ? pinchPoint(hand, marker.position) : null;
+            marker.visible = !!p;
+            if (!p) continue;
+            const pinching = !!status.pinching[hand.userData.inputSource.handedness];
+            marker.material.color.set(pinching ? 0x33dd66 : 0xffffff);
+            if (nearCube(p)) hover = true;
+          }
+
+          if (grab && holders.length === 1 && pinchPoint(holders[0], p0)) {
+            cube.position.copy(p0).add(grab.offset);
+          } else if (grab && holders.length === 2 && pinchPoint(holders[0], p0) && pinchPoint(holders[1], p1)) {
+            const s = THREE.MathUtils.clamp((grab.s0 * p0.distanceTo(p1)) / grab.d0, MIN_SCALE, MAX_SCALE);
+            cube.scale.setScalar(s);
+            cube.position.copy(p0).add(p1).multiplyScalar(0.5);
+          }
+          status.scale = Math.round(cube.scale.x * 100) / 100;
+          material.color.set(holders.length === 2 ? COLORS.stretch : holders.length === 1 ? COLORS.grab : hover ? COLORS.hover : COLORS.idle);
+
+          const side = (h) => (status.hands.includes(h) ? (status.pinching[h] ? 'pinch' : 'open') : '—');
+          statusEl.textContent = `right: ${side('right')}   left: ${side('left')}\n${status.mode}  ×${status.scale.toFixed(2)}`;
+        }
+        renderer.render(scene, camera);
+      });
+
+      addEventListener('resize', () => {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+      });
+    </script>
+  </body>
+</html>

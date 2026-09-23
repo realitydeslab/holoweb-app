@@ -53,6 +53,8 @@ final class ARBridge: NSObject {
     var handsRequested = false
     let handTracker = HandTracker()
     var handStats = HandStats()
+    /// ARFrame time (ms) of the last hand result that contained a hand (hitch diagnostics).
+    var lastHandResultMs: Double?
     /// The page asked for "mesh-detection".
     var meshesRequested = false
     let meshStreamer = MeshStreamer()
