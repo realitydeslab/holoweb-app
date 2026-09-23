@@ -1,0 +1,46 @@
+<!doctype html><html><head><style>html,body{margin:0;width:1024px;height:1024px;overflow:hidden}</style></head><body>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/"}}</script>
+<script type="module">
+// The HoloKit mark (Design/HoloKit/Asset 4.svg, viewBox 45.66 x 72.74, y down), extruded like
+// cardboard and lit in two tones of one matte colour, after the 3D WebXR logo on immersiveweb.dev.
+import * as THREE from 'three';
+const q = new URLSearchParams(location.search);
+document.body.style.background = q.get('bg') || '#fff';
+const pieces = [
+  [[11.35,72.74],[2.88,72.74],[37.76,37.51],[45.66,37.51]],
+  [[35.16,35.16],[0,35.16],[35.16,0]],
+  [[37.76,0],[45.65,0],[45.65,35.16],[37.76,35.16]],
+  [[0.18,37.54],[0.18,72.7],[35.33,37.54]],
+];
+const r = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+r.setPixelRatio(1); r.setSize(1024, 1024); r.setClearColor(0, 0); document.body.appendChild(r.domElement);
+r.domElement.style.cssText = 'position:absolute;inset:0';
+const scene = new THREE.Scene();
+const face = new THREE.MeshStandardMaterial({ color: q.get('face') || '#e80003', roughness: 1, metalness: 0 });
+const side = new THREE.MeshStandardMaterial({ color: q.get('side') || '#c00008', roughness: 1, metalness: 0 });
+const group = new THREE.Group();
+const depth = +(q.get('depth') || 7);
+for (const pts of pieces) {
+  const shape = new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x - 22.83, 36.37 - y)));
+  const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: true, bevelThickness: 0.6, bevelSize: 0.5, bevelSegments: 2 });
+  group.add(new THREE.Mesh(geo, [face, side]));
+}
+group.rotation.set(THREE.MathUtils.degToRad(+(q.get('rx') || 14)), THREE.MathUtils.degToRad(+(q.get('ry') || -28)), 0);
+scene.add(group);
+// Orbit ring around the mark (the web around HoloKit): a torus tilted into an ellipse, so it passes
+// in front of the mark on one side and behind it on the other.
+if (q.get('ring') !== '0') {
+  const ringMat = new THREE.MeshStandardMaterial({ color: q.get('ring') || q.get('face') || '#e80003', roughness: 0.6, metalness: 0,
+    emissive: q.get('ring') || '#000000', emissiveIntensity: +(q.get('glow') || 0) });
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(+(q.get('rr') || 50), +(q.get('rt') || 2.4), 32, 200), ringMat);
+  ring.rotation.set(THREE.MathUtils.degToRad(+(q.get('tx') || 72)), THREE.MathUtils.degToRad(+(q.get('ty') || 0)), THREE.MathUtils.degToRad(+(q.get('tz') || -24)));
+  scene.add(ring);
+  window.ring = ring;
+}
+scene.add(new THREE.AmbientLight(0xffffff, 1.4));
+const key = new THREE.DirectionalLight(0xffffff, 2.2); key.position.set(-0.4, 0.6, 1); scene.add(key);
+const cam = new THREE.PerspectiveCamera(30, 1, 1, 1000);
+cam.position.set(0, 0, 160 / (+(q.get('zoom') || 1))); cam.lookAt(0, 0, 0);
+const box = new THREE.Box3().setFromObject(group); group.position.sub(box.getCenter(new THREE.Vector3()));
+r.render(scene, cam); window.info = {}; window.done = true;
+</script></body></html>
