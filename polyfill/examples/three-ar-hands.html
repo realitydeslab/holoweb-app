@@ -31,7 +31,7 @@
       import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 
       const params = new URLSearchParams(location.search);
-      const status = (window.__handStatus = { backend: '', xrFrames: 0, hands: 0, joints: 0, handSelects: 0, cubes: 0, errors: [] });
+      const status = (window.__handStatus = { backend: '', xrFrames: 0, hands: 0, handedness: [], joints: 0, handSelects: 0, handSqueezes: 0, lastSelect: '', lastSqueeze: '', cubes: 0, errors: [] });
       addEventListener('error', (e) => status.errors.push(String(e.message)));
       addEventListener('unhandledrejection', (e) => status.errors.push(String(e.reason)));
 
@@ -72,8 +72,16 @@
         session.addEventListener('select', (e) => {
           if (!e.inputSource.hand) return;
           status.handSelects++;
+          status.lastSelect = e.inputSource.handedness;
           dropCube(e.inputSource);
         });
+        session.addEventListener('squeeze', (e) => {
+          if (!e.inputSource.hand) return;
+          status.handSqueezes++;
+          status.lastSqueeze = e.inputSource.handedness;
+        });
+        // Live readout for hand-in-the-loop device tests (forwarded to the native console).
+        setInterval(() => console.log('[hands] ' + JSON.stringify(status)), 1000);
       });
 
       renderer.setAnimationLoop((time, frame) => {
@@ -82,6 +90,7 @@
           const session = renderer.xr.getSession();
           const handSources = [...session.inputSources].filter((s) => s.hand);
           status.hands = handSources.length;
+          status.handedness = handSources.map((s) => s.handedness);
           const ref = renderer.xr.getReferenceSpace();
           status.joints = handSources.length ? [...handSources[0].hand.values()].filter((j) => frame.getJointPose(j, ref)).length : 0;
         }

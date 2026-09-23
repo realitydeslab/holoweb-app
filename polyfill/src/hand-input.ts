@@ -38,7 +38,7 @@ export interface NativeHandData {
 /** `{ t, hands }` (t = source ARFrame timestamp, ms), or a bare array (older native builds). */
 export type NativeHandsUpdate = NativeHandData[] | { t?: number; hands: NativeHandData[] };
 
-export const LOST_MS = 250;
+export const LOST_MS = 500;
 export const MIN_CONFIDENCE = 0.3;
 
 type Gesture = 'select' | 'squeeze';

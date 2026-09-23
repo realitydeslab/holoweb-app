@@ -3,6 +3,7 @@ import { mat4, vec3 } from 'gl-matrix';
 import { XRHandJoint } from 'iwer/lib/input/XRHand.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { buildSkeleton, isCompleteHand, JOINTS, METACARPAL_T, pinchState } from '../src/hands.js';
+import { LOST_MS } from '../src/hand-input.js';
 import type { HoloWebGlobal } from '../src/index.js';
 import { mockHand, mockHandCameraSpace } from '../src/mock-hands.js';
 
@@ -169,7 +170,7 @@ describe('WebXR Hand Input over native hands', () => {
     }
   });
 
-  it('drops a hand 250 ms after the last update (selectend only if pinching)', async () => {
+  it('drops a hand LOST_MS (500 ms) after the last update (selectend only if pinching)', async () => {
     const { session } = await start(['hand-tracking']);
     try {
     const events: string[] = [];
@@ -180,7 +181,7 @@ describe('WebXR Hand Input over native hands', () => {
     await inFrame(session);
     sendHand('pinched');
     await inFrame(session);
-    await new Promise((r) => setTimeout(r, 300));
+    await new Promise((r) => setTimeout(r, LOST_MS + 50));
     await inFrame(session);
     await inFrame(session);
     expect(session.inputSources.some((s) => s.hand)).toBe(false);
