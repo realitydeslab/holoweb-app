@@ -137,11 +137,17 @@ class Renderer {
             // The semaphore is captured strongly: a DispatchSemaphore released while below its
             //   initial value traps, which happened when the Metal view was torn down (AR exit)
             //   with a frame still on the GPU.
+            // The texture cache is captured too, and outlives the textures: releasing a CVMetalTexture
+            //   returns its backing to the cache, which crashed (EXC_BAD_ACCESS in
+            //   CVMetalTextureCache::bufferBackingNotInUse) when the Renderer and its cache were freed
+            //   on AR exit before the GPU finished the last frame.
             var textures = [capturedImageTextureY, capturedImageTextureCbCr]
             let semaphore = inFlightSemaphore
+            let textureCache = capturedImageTextureCache
             commandBuffer.addCompletedHandler { _ in
                 semaphore.signal()
                 textures.removeAll()
+                withExtendedLifetime(textureCache) {}
             }
             
             updateBufferStates()

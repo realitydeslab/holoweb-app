@@ -60,6 +60,7 @@ final class HoloWebState: NSObject {
     let webView: WKWebView
     private(set) var bridge: ARBridge?
     @ObservationIgnored private var testClickTask: Task<Void, Never>?
+    @ObservationIgnored private var debugCycles = 0
 
     private nonisolated static let logHandlerName = "holowebLog"
 
@@ -143,6 +144,7 @@ final class HoloWebState: NSObject {
         print("[state] phase -> \(phase)")
         #if DEBUG
         startDebugToggle()
+        startDebugCycle()
         #endif
     }
 
@@ -168,6 +170,22 @@ final class HoloWebState: NSObject {
                 guard self.isInXRSession else { return }
                 self.setMode(self.mode == .mono ? .stereo : .mono)
             }
+        }
+    }
+
+    /// Test aid: HOLOWEB_TEST_CYCLE=<seconds> exits the XR session after that long (tearing down the
+    /// Metal view with frames possibly still on the GPU) and reloads, so an `?autostart` page
+    /// re-enters AR: a stress loop for session teardown.
+    private func startDebugCycle() {
+        guard let raw = ProcessInfo.processInfo.environment["HOLOWEB_TEST_CYCLE"],
+              let seconds = Double(raw), seconds > 0 else { return }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard let self, self.isInXRSession else { return }
+            self.debugCycles += 1
+            print("[test] cycle \(self.debugCycles): exit XR + reload")
+            self.exitXR()
+            self.reload()
         }
     }
 
