@@ -80,7 +80,7 @@ Only `https` targets are accepted. Tapping these links inside HoloWeb opens the 
 | Plane detection | `plane-detection`, `XRPlane` polygons with stable identity and `lastChangedTime` | `ARPlaneAnchor` |
 | Mesh detection (LiDAR) | `mesh-detection`, `XRMesh` with semantic labels | `ARMeshAnchor`, sent at most 2 Hz, changed meshes only |
 | Light estimation | `light-estimation`, `XRLightProbe`, `getLightEstimate`, reflection cube map | ARKit light estimate and environment probe (32 px sRGB cube) |
-| Hand tracking (LiDAR) | `hand-tracking`, 25-joint `XRHand`, pinch → `select`, grab → `squeeze` | Vision hand pose lifted to 3D with smoothed scene depth, One Euro filtering; handedness derived from hand geometry |
+| Hand tracking (LiDAR) | `hand-tracking`, 25-joint `XRHand`, pinch → `select`, grab → `squeeze`, up to two hands | Vision hand pose at 60 Hz on the upright camera image, lifted to 3D with smoothed scene depth, One Euro filtering; handedness derived from hand geometry |
 | Image tracking | `image-tracking` ([explainer](https://github.com/immersive-web/image-tracking/blob/main/explainer.md)): `trackedImages`, `getTrackedImageScores`, `getImageTrackingResults` | `ARReferenceImage` / `ARImageAnchor`, up to 4 images, automatic scale estimation |
 | DOM overlay | `dom-overlay` (root = `body`), `beforexrselect` | page DOM over the XR canvas |
 | Reference spaces | `viewer`, `local`, `local-floor` (floor from the lowest horizontal plane, with `reset` events), `unbounded` | ARKit world tracking |
@@ -100,6 +100,105 @@ __holoweb.setPrediction(25)         // stereo pose prediction in ms, 0 disables
 await __holoweb.hitTest(origin, direction)
 __holoweb.missingGlobals()          // WebXR globals that are not installed (diagnostics)
 ```
+
+## WebXR API reference
+
+What a page can use in HoloWeb, by interface. Everything is the standard WebXR API; nothing HoloWeb-specific is needed.
+
+| Area | Supported |
+|---|---|
+| Entry | `navigator.xr.isSessionSupported()`, `navigator.xr.requestSession('immersive-ar' \| 'immersive-vr' \| 'inline', { requiredFeatures, optionalFeatures, domOverlay, trackedImages })` |
+| Session | `XRSession.requestAnimationFrame`, `requestReferenceSpace`, `updateRenderState`, `end`, `enabledFeatures`, `inputSources`, `environmentBlendMode`, `interactionMode`, `visibilityState`, `frameRate`; events `end`, `select*`, `squeeze*`, `inputsourceschange`, `visibilitychange` |
+| Frame | `XRFrame.getViewerPose`, `getPose`, `getHitTestResults`, `getHitTestResultsForTransientInput`, `createAnchor`, `trackedAnchors`, `detectedPlanes`, `detectedMeshes`, `getLightEstimate`, `getJointPose`, `fillPoses`, `fillJointRadii`, `getImageTrackingResults` |
+| Rendering | `XRWebGLLayer` (WebGL / WebGL2), `XRGPUBinding` + `getViewSubImage` (WebGPU), `XRView` (`projectionMatrix`, `transform`, `eye`), `getViewport` |
+| Reference spaces | `viewer`, `local`, `local-floor` (with `reset`), `unbounded`, `getOffsetReferenceSpace` |
+| Hit test | `requestHitTestSource({ space, offsetRay })`, `requestHitTestSourceForTransientInput({ profile: 'generic-touchscreen' })`, `XRHitTestResult.createAnchor` |
+| Anchors | `XRFrame.createAnchor`, `XRAnchor.anchorSpace`, `XRAnchor.delete` |
+| Planes / meshes | `XRPlane` (`polygon`, `orientation`, `planeSpace`, `lastChangedTime`), `XRMesh` (`vertices`, `indices`, `meshSpace`, `semanticLabel`) |
+| Lighting | `requestLightProbe`, `XRLightEstimate` (spherical harmonics, primary light), `XRWebGLBinding.getReflectionCubeMap`, `reflectionchange` |
+| Hands | `XRInputSource.hand` (`XRHand`, 25 `XRJointSpace`s), hand `select` / `squeeze`, target ray from the pinch point |
+| Image tracking | `trackedImages: [{ image, widthInMeters }]`, `getTrackedImageScores`, `XRImageTrackingResult` (`imageSpace`, `trackingState`, `measuredWidthInMeters`) |
+| Screen input | transient `screen` input source (`generic-touchscreen`), `select` events, DOM overlay `beforexrselect` |
+
+## Examples
+
+### Minimal hit test (plain WebXR)
+
+```js
+const session = await navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['hit-test'] });
+const gl = canvas.getContext('webgl2', { xrCompatible: true });
+session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+const local = await session.requestReferenceSpace('local');
+const viewer = await session.requestReferenceSpace('viewer');
+const hitSource = await session.requestHitTestSource({ space: viewer });
+
+session.requestAnimationFrame(function onFrame(t, frame) {
+  const hit = frame.getHitTestResults(hitSource)[0];
+  if (hit) placeReticle(hit.getPose(local).transform.matrix);
+  // ... draw each view of frame.getViewerPose(local) into its viewport
+  session.requestAnimationFrame(onFrame);
+});
+```
+
+### three.js with hands (WebGPU or WebGL)
+
+```js
+import * as THREE from 'three/webgpu';
+import { ARButton } from 'three/addons/webxr/ARButton.js';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
+
+const renderer = new THREE.WebGPURenderer({ alpha: true });
+renderer.xr.enabled = true;
+document.body.append(renderer.domElement, ARButton.createButton(renderer, { optionalFeatures: ['hand-tracking'] }));
+
+const hand = renderer.xr.getHand(0);
+hand.add(new XRHandModelFactory().createHandModel(hand, 'spheres'));
+scene.add(hand);
+renderer.xr.addEventListener('sessionstart', () =>
+  renderer.xr.getSession().addEventListener('select', (e) => e.inputSource.hand && onPinch(e.inputSource)));
+```
+
+### Image tracking
+
+```js
+const bitmap = await createImageBitmap(await (await fetch('marker.png')).blob());
+const session = await navigator.xr.requestSession('immersive-ar', {
+  requiredFeatures: ['image-tracking'],
+  trackedImages: [{ image: bitmap, widthInMeters: 0.15 }],
+});
+const scores = await session.getTrackedImageScores(); // ['trackable'] or ['untrackable']
+// per frame:
+for (const result of frame.getImageTrackingResults()) {
+  if (result.trackingState === 'tracked') placeOnImage(frame.getPose(result.imageSpace, local).transform.matrix);
+}
+```
+
+### HoloKit stereo from a page
+
+Users switch with the corner glasses button. A page can also do it:
+
+```js
+if (window.__holoweb) await __holoweb.setMode('stereo');
+session.environmentBlendMode; // 'additive' in stereo: black is transparent in HoloKit
+```
+
+### Sharing a page
+
+Any https WebXR page opens in HoloWeb (or the App Clip) through `https://holoweb.app/c?url=<percent-encoded URL>`; put that link in a QR code. The gallery at https://holoweb.app/ builds these links and QR codes.
+
+### Bundled example pages
+
+Debug builds open these with `HOLOWEB_PAGE=examples/<page>`; the sources are in `polyfill/examples/`.
+
+| Page | Shows |
+|---|---|
+| `demo.html` | WebGPU showcase scene 1 m in front, no surface needed; mono/stereo switching |
+| `three-ar.html` | three.js WebGL hit test, anchors and light estimation |
+| `three-ar-webgpu.html` | the same on the WebGPU backend |
+| `three-ar-hands.html` | 25-joint hand models; pinch drops a cube at the fingertip |
+| `three-ar-grab.html` | pinch to grab a cube with either hand; pinch with both hands to stretch it |
+| `image-tracking.html` | tracks the HoloWeb marker (`assets/holoweb-marker.png`, 0.15 m wide) |
+| `threejs/webxr_ar_hittest.html`, `webxr_ar_lighting.html`, `webxr_ar_plane_detection.html` | the official three.js AR examples, offline |
 
 ## Verified content
 
@@ -185,11 +284,13 @@ Debug builds accept launch environment variables for unattended runs:
 | `HOLOWEB_NO_POLYFILL` | disable the polyfill |
 | `HOLOWEB_AR_DIAG` | ARKit diagnostics |
 | `HOLOWEB_ARKIT_ALL` | run the old always-on ARKit configuration, for heat A/B runs |
+| `HOLOWEB_TEST_CYCLE` | exit XR and reload every N seconds (session teardown stress loop with an `?autostart` page) |
 
 ## Known limitations
 
 - HoloKit optical alignment and stereo prediction tuning have not been checked in a real HoloKit X headset yet.
 - Hand tracking in `immersive-vr` (the Immersive Web hands samples) still needs a device recheck with real hands.
+- Hand tracking uses the phone's camera: hands closer than about 30 cm, partly out of frame, or in dim light are detected less often, and fingertip depth is mostly inferred from the palm.
 - Plane detection needs textured surfaces and some phone movement; a still phone may take 10 s or more to report the first plane.
 - AR is thermally heavy. The camera and ARKit tracking use about 1.4 CPU cores even when idle. Rendering WebGL at 2× instead of 3× and lowering the camera format in stereo are the next planned savings.
 - The App Store Connect App Clip experience, TestFlight distribution and App Clip Code images are still to be set up.
