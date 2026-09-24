@@ -8,8 +8,8 @@ struct HoloWebApp: App {
     @UIApplicationDelegateAdaptor(OrientationLockAppDelegate.self) private var orientationLock
     @State private var state = HoloWebState()
 
-    /// Home page: the holoweb.app gallery of WebXR experiences.
-    static let defaultURL = URL(string: "https://holoweb.app/")!
+    /// Home page: the web.holokit.io gallery of WebXR experiences.
+    static let defaultURL = URL(string: "https://web.holokit.io/")!
 
     /// `HOLOWEB_PAGE` selects a bundled page under `Web/`; `HOLOWEB_URL` any URL.
     private static func launchURL() -> URL {

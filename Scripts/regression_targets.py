@@ -88,7 +88,7 @@ GROUPS: dict[str, list[Target]] = {
                **IMAGE_CHECKS),
         Target("example-image-tracking-button", "examples/image-tracking.html?stats", **IMAGE_CHECKS),
     ],
-    # Gallery entries (https://holoweb.app/). For Needle pages, entered-ar shows whether Needle
+    # Gallery entries (https://web.holokit.io/). For Needle pages, entered-ar shows whether Needle
     # takes the WebXR path or Quick Look under HoloWeb's user agent.
     "gallery": [
         Target("gallery-supersplat", "https://superspl.at/s?id=5c0f892e&webgl", click="button.sse-arMode",

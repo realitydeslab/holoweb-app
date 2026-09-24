@@ -1,6 +1,6 @@
-# HoloWeb
+# HoloKit Web (HoloWeb)
 
-HoloWeb runs WebXR AR content on iPhone. Safari on iOS has no WebXR; HoloWeb is an iOS app plus an App Clip that loads any web page in a `WKWebView`, injects a WebXR polyfill, and streams ARKit tracking into it at 60 Hz. Pages written for WebXR (three.js, Babylon.js, PlayCanvas, A-Frame, model-viewer, Needle, Unity WebXR exports, raw WebXR) run unchanged.
+HoloKit Web (codename HoloWeb) runs WebXR AR content on iPhone. Safari on iOS has no WebXR; HoloWeb is an iOS app plus an App Clip that loads any web page in a `WKWebView`, injects a WebXR polyfill, and streams ARKit tracking into it at 60 Hz. Pages written for WebXR (three.js, Babylon.js, PlayCanvas, A-Frame, model-viewer, Needle, Unity WebXR exports, raw WebXR) run unchanged.
 
 Two viewing modes, switchable at any time during a session:
 
@@ -11,7 +11,7 @@ Requires **iOS 27** (WKJSHandle transport, WebGPU in WKWebView). Developed and v
 
 ## Quick start
 
-1. Open https://holoweb.app/ in the app, or scan a HoloWeb QR code / App Clip Code to get the App Clip.
+1. Open https://web.holokit.io/ in the app, or scan a HoloWeb QR code / App Clip Code to get the App Clip.
 2. Pick an experience and tap the page's own **Start AR** button. Sessions always start in handheld mono.
 3. Use the corner controls: **glasses** = switch to HoloKit stereo (the **phone** icon switches back), **✕** = exit the XR session, **grid** = gallery, **↻** = reload.
 
@@ -19,9 +19,9 @@ Invocation links:
 
 | Link | Opens |
 |---|---|
-| `https://holoweb.app/launch?url=<percent-encoded https URL>` | that page |
-| `https://holoweb.app/c?url=<percent-encoded https URL>` | that page (App Clip invocation) |
-| `https://holoweb.app/c/<code>` | a gallery short link (App Clip Code target) |
+| `https://web.holokit.io/launch?url=<percent-encoded https URL>` | that page |
+| `https://web.holokit.io/c?url=<percent-encoded https URL>` | that page (App Clip invocation) |
+| `https://web.holokit.io/c/<code>` | a gallery short link (App Clip Code target) |
 
 Only `https` targets are accepted. Tapping these links inside HoloWeb opens the target in place.
 
@@ -33,8 +33,8 @@ Only `https` targets are accepted. Tapping these links inside HoloWeb opens the 
 - Viewer states: **browsing** (normal scrollable web page, camera off) → **AR mono** (page started a session) → **AR stereo** (corner toggle) → back to browsing on exit or navigation. `immersive-vr` sessions get their own opaque states (camera off, ARKit used for tracking only).
 - Corner controls: one compact capsule pinned to the same **physical** corner of the phone (the portrait bottom-right). With the Dynamic Island on the left (the HoloKit orientation) it sits at the top-right, above the HoloKit eye viewports. Its size never changes between states.
 - **Stereo from any orientation:** switching to stereo locks the current interface orientation instead of rotating the screen. The page's framebuffer keeps its session-start size, and the polyfill turns the HoloKit eye layout into it, so stereo works whether the session was started in portrait or landscape.
-- Gallery home page (https://holoweb.app/) with 15 curated WebXR experiences, QR codes and short links.
-- Associated domains / AASA for `holoweb.app` (`/launch`, `/c`, `/c/*`) and App Clip invocation.
+- Gallery home page (https://web.holokit.io/) with 15 curated WebXR experiences, QR codes and short links.
+- Associated domains / AASA for `web.holokit.io` (`/launch`, `/c`, `/c/*`) and App Clip invocation.
 
 ### Native ↔ web bridge
 
@@ -184,7 +184,7 @@ session.environmentBlendMode; // 'additive' in stereo: black is transparent in H
 
 ### Sharing a page
 
-Any https WebXR page opens in HoloWeb (or the App Clip) through `https://holoweb.app/c?url=<percent-encoded URL>`; put that link in a QR code. The gallery at https://holoweb.app/ builds these links and QR codes.
+Any https WebXR page opens in HoloWeb (or the App Clip) through `https://web.holokit.io/c?url=<percent-encoded URL>`; put that link in a QR code. The gallery at https://web.holokit.io/ builds these links and QR codes.
 
 ### Bundled example pages
 

@@ -4,8 +4,8 @@
 <dict>
     <key>com.apple.developer.associated-domains</key>
     <array>
-        <string>applinks:holoweb.app</string>
-        <string>appclips:holoweb.app</string>
+        <string>applinks:web.holokit.io</string>
+        <string>appclips:web.holokit.io</string>
     </array>
 </dict>
 </plist>

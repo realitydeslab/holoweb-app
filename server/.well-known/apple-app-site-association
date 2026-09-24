@@ -2,17 +2,17 @@
   "applinks": {
     "details": [
       {
-        "appIDs": ["KR9H35SQQ9.org.realitydeslab.holoweb"],
+        "appIDs": ["KR9H35SQQ9.org.realitydeslab.holokit-web"],
         "components": [
-          { "/": "/launch", "?": { "url": "?*" }, "comment": "holoweb.app/launch?url=<page>" },
+          { "/": "/launch", "?": { "url": "?*" }, "comment": "web.holokit.io/launch?url=<page>" },
           { "/": "/launch/", "?": { "url": "?*" }, "comment": "trailing-slash variant from static export" },
-          { "/": "/c", "?": { "url": "?*" }, "comment": "holoweb.app/c?url=<page>" },
+          { "/": "/c", "?": { "url": "?*" }, "comment": "web.holokit.io/c?url=<page>" },
           { "/": "/c/", "?": { "url": "?*" }, "comment": "trailing-slash variant from static export" }
         ]
       }
     ]
   },
   "appclips": {
-    "apps": ["KR9H35SQQ9.org.realitydeslab.holoweb.Clip"]
+    "apps": ["KR9H35SQQ9.org.realitydeslab.holokit-web.Clip"]
   }
 }
