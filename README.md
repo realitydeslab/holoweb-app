@@ -295,6 +295,16 @@ Debug builds accept launch environment variables for unattended runs:
 - AR is thermally heavy. The camera and ARKit tracking use about 1.4 CPU cores even when idle. Rendering WebGL at 2× instead of 3× and lowering the camera format in stereo are the next planned savings.
 - The App Store Connect App Clip experience, TestFlight distribution and App Clip Code images are still to be set up.
 
+## Use cases
+
+- **Experimental and artistic experiences.** AR turns reality into a canvas, but short, abstract or
+  experimental pieces clash with the app-store model: installing a native app for a brief piece is
+  too much friction. A link keeps them one tap away, and artists reach more people and devices from
+  one codebase ([WebXR explainer](https://immersive-web.github.io/webxr/explainer.html#artistic-experiences)).
+- **Research and education.** App Store review and developer accounts slow down mixed-reality
+  research and teaching; students and their audiences can instead share and open a URL, so the work
+  stays on the creation itself.
+
 ## Background
 
 Safari on iOS has never shipped WebXR, and Safari on visionOS supports VR sessions but not AR. The previous way to run WebXR AR on iPhone, [Mozilla's WebXR Viewer](https://github.com/mozilla-mobile/webxr-ios/), is no longer maintained and predates WebXR 1.0. HoloWeb fills that gap with a current WebXR implementation (hit test, anchors, planes, meshes, lighting, hands, image tracking, WebGPU) and adds HoloKit stereo for hands-free mixed reality.
