@@ -10,6 +10,12 @@ Deliver an executable plan for HoloWeb: (1) iOS app + App Clip that loads a webp
 - [x] Phase 4: Write deliverable plan/holoweb_plan.md with milestones + verification
 - [x] Phase 5: Review and deliver summary
 - [x] Execution: M0 cleanup, M1 WebGPU check, M2 polyfill, M3/M3b bridge + camera sync, M4 XRGPUBinding, M5 stereo (math + prediction), M6 App Clip, M7 anchors/light/floor — all verified on iPhone 15 Pro iOS 27 (see notes.md logs)
+- [x] AASA deploy (holoweb.app, cached by Apple CDN)
+- [x] App Store Connect record "HoloWeb: WebXR for iPhone" (6815450023) + TestFlight: 1.0 (2609240146) uploaded via Scripts/testflight.sh, VALID; internal group "Internal" with amber@reality.design (2026-09-24)
+- [ ] Push holoweb-app (website pushed 2026-09-24; app blocked on 6 remote README commits from 2024, merge pending)
+- [ ] iOS 27: replace deprecated `viewMatrix(for:)` / `projectionMatrix(for:…)` / `displayTransform(for:…)` with the rotation-angle APIs
+- [ ] Cardboard viewer mode v1: viewer profiles (handheld / HoloKit / Cardboard), mode picker, Cardboard stereo math, opaque, tests, device check
+- [ ] Cardboard v2: lens distortion mesh, camera passthrough for immersive-ar
 
 ## Key Questions
 1. Does WKWebView on iOS 27 expose navigator.gpu (WebGPU)? Any feature flag needed?
@@ -23,6 +29,8 @@ Deliver an executable plan for HoloWeb: (1) iOS app + App Clip that loads a webp
 - Transport: native-push FramePacket per ARFrame via evaluateJavaScript; JS keeps latest packet. Rationale: removes one round trip vs the legacy onUpdate poll.
 - WebGPU: rely on iOS 26+ default; content must use WebGL2 backend for XR until XRGPUBinding is polyfilled (P2).
 - App Clip: digital invocation first (100 MB cap), keep bundle small for a later 15 MB QR option.
+- Brand (2026-09-24): HoloWeb is a device-agnostic WebXR runtime; HoloKit and Cardboard are viewer modes. A brief HoloKit Web rename was reverted.
+- Cardboard v1: opaque (no camera) and no lens-distortion correction; both are v2. AR Module mapping: handheld = alpha-blend/screen-space, HoloKit = additive/world-space, Cardboard = opaque/world-space.
 
 ## Errors Encountered
 - (none yet)
