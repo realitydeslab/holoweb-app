@@ -3,10 +3,10 @@
 # without Xcode's account settings: signs and uploads with an App Store Connect API key.
 #
 # One-time setup (App Store Connect -> Users and Access -> Integrations -> App Store Connect API,
-# a Team key with the Admin role: App Manager keys cannot use cloud-managed distribution signing):
+# a Team key with the App Manager role):
 #   mkdir -p ~/.appstoreconnect/private_keys && mv AuthKey_<KEYID>.p8 ~/.appstoreconnect/private_keys/
 #   export ASC_KEY_ID=<KEYID> ASC_ISSUER_ID=<issuer uuid>     # e.g. in ~/.zshrc; never commit them
-# The app record (bundle ID org.realitydeslab.holokit-web) must already exist in App Store Connect.
+# The app record (bundle ID org.realitydeslab.holoweb) must already exist in App Store Connect.
 #
 # Usage: Scripts/testflight.sh [--skip-upload]
 # The build number is the current time (yymmddHHMM), so every run uploads a new, larger build.

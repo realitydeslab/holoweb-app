@@ -268,8 +268,8 @@ final class HoloWebState: NSObject {
         return BundledPageSchemeHandler.url(forBundledPath: path)
     }
 
-    /// Gallery home page (web.holokit.io).
-    static let homeURL = URL(string: "https://web.holokit.io/")!
+    /// Gallery home page (holoweb.app).
+    static let homeURL = URL(string: "https://holoweb.app/")!
 
     func goHome() {
         if isInXRSession { exitXR() }

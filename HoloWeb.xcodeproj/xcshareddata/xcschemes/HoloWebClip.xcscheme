@@ -53,7 +53,7 @@
       <EnvironmentVariables>
          <EnvironmentVariable
             key = "_XCAppClipURL"
-            value = "https://web.holokit.io/c?url=https%3A%2F%2Fweb.holokit.io%2Ftest2%2F"
+            value = "https://holoweb.app/c?url=https%3A%2F%2Fholoweb.app%2Ftest2%2F"
             isEnabled = "YES">
          </EnvironmentVariable>
       </EnvironmentVariables>

@@ -8,7 +8,7 @@ struct HoloWebClipApp: App {
     @UIApplicationDelegateAdaptor(OrientationLockAppDelegate.self) private var orientationLock
     @State private var state = HoloWebState()
 
-    private static let defaultURL = URL(string: "https://web.holokit.io/test2/")!
+    private static let defaultURL = URL(string: "https://holoweb.app/test2/")!
 
     /// How long to wait for an invocation `NSUserActivity` before showing `defaultURL`.
     private static let invocationTimeout: Duration = .seconds(2)

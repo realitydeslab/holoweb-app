@@ -31,7 +31,7 @@ from regression_targets import GROUPS, Target
 
 ROOT = Path(__file__).resolve().parent.parent
 POLYFILL = ROOT / "polyfill"
-BUNDLE_ID = "org.realitydeslab.holokit-web"
+BUNDLE_ID = "org.realitydeslab.holoweb"
 MIN_FPS = 55.0
 
 
@@ -318,7 +318,7 @@ def _stage_device(report: Report, device: str, only: list[str] | None, install: 
                "phase -> browsing" in log and "phase -> arMono" not in log)
 
     target = "https://immersive-web.github.io/webxr-samples/immersive-ar-session.html"
-    link = "https://web.holokit.io/launch?url=" + target.replace(":", "%3A").replace("/", "%2F")
+    link = "https://holoweb.app/launch?url=" + target.replace(":", "%3A").replace("/", "%2F")
     log = launch(device, {"HOLOWEB_URL": link}, 12)
     report.add("device.in-app-link-interception", f"[state] load {target}" in log)
 
