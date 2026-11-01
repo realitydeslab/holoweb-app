@@ -66,3 +66,15 @@ fastlane/test_output
 polyfill/node_modules/
 polyfill/dist/
 polyfill/test-results/
+
+# Xcode build products (archives, exports, DerivedData)
+build/
+DerivedData/
+*.xcarchive
+
+# macOS / Python / local tooling
+.DS_Store
+__pycache__/
+*.pyc
+**/.claude/logs/
+**/.claude/settings.local.json
