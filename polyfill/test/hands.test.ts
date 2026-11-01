@@ -2,6 +2,7 @@
 import { mat4, vec3 } from 'gl-matrix';
 import { XRHandJoint } from 'iwer/lib/input/XRHand.js';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { startFrames } from './support/xr-frames.js';
 import { buildSkeleton, isCompleteHand, JOINTS, METACARPAL_T, pinchState } from '../src/hands.js';
 import { LOST_MS } from '../src/hand-input.js';
 import type { HoloWebGlobal } from '../src/index.js';
@@ -105,7 +106,7 @@ const sendHand = (p: 'open' | 'pinched') => hw.onHands([mockHand(identity, p ===
 
 async function start(features: string[]): Promise<{ session: Session; local: unknown }> {
   const session = await xr().requestSession('immersive-ar', { optionalFeatures: features });
-  session.updateRenderState({ layers: [{}] });
+  startFrames(session);
   frame0();
   const local = await session.requestReferenceSpace('local');
   await inFrame(session);

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { mat4 } from 'gl-matrix';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { startFrames } from './support/xr-frames.js';
 import { insideOutline, raycastPlanes, type NativePlaneData } from '../src/hittest.js';
 import type { HoloWebGlobal } from '../src/index.js';
 import { mockEnvironment, mockPlanes } from '../src/mock-environment.js';
@@ -51,7 +52,7 @@ const inFrame = <T>(s: Session, fn: (f: Frame) => T) =>
 
 async function start(features: string[]): Promise<{ session: Session; local: unknown }> {
   const session = await xr().requestSession('immersive-ar', { optionalFeatures: features });
-  session.updateRenderState({ layers: [{}] });
+  startFrames(session);
   hw.onFrame(1, 'mono', Array.from(mat4.create()), Array.from(mat4.create()), Array.from(mat4.perspective(mat4.create(), 1, 2, 0.01, 100)), null, 'normal');
   const local = await session.requestReferenceSpace('local');
   await inFrame(session, () => undefined);
@@ -201,7 +202,7 @@ describe('transient-input hit test (requestHitTestSourceForTransientInput)', () 
   it('hit-tests a screen tap against the planes', async () => {
     const session = await xr().requestSession('immersive-ar', { requiredFeatures: ['hit-test'] });
     try {
-      session.updateRenderState({ layers: [{}] });
+      startFrames(session);
       // camera 1.5 m up looking straight down, floor plane at y = 0
       const down = mat4.fromRotationTranslation(mat4.create(), [-Math.SQRT1_2, 0, 0, Math.SQRT1_2], [0, 1.5, 0]);
       hw.onFrame(1, 'mono', Array.from(down), Array.from(mat4.invert(mat4.create(), down)!), Array.from(mat4.perspective(mat4.create(), 1, 2, 0.01, 100)), null, 'normal');
@@ -235,7 +236,7 @@ describe('G4: XRHitTestResult.createAnchor on a result from an earlier frame', (
   it('creates a native anchor from the stored pose while the session is live; XRFrame.createAnchor stays strict', async () => {
     const session = await xr().requestSession('immersive-ar', { requiredFeatures: ['hit-test', 'anchors'] });
     try {
-      session.updateRenderState({ layers: [{}] });
+      startFrames(session);
       const down = mat4.fromRotationTranslation(mat4.create(), [-Math.SQRT1_2, 0, 0, Math.SQRT1_2], [0, 1.5, 0]);
       hw.onFrame(1, 'mono', Array.from(down), Array.from(mat4.invert(mat4.create(), down)!), Array.from(mat4.perspective(mat4.create(), 1, 2, 0.01, 100)), null, 'normal');
       hw.onPlanes([{ id: 'f', transform: Array.from(mat4.create()), extent: [4, 4], orientation: 'horizontal' }]);

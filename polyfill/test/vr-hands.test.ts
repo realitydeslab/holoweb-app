@@ -4,6 +4,7 @@
 // granted it, native's requestSession carries it (so the Vision tracker starts), and onHands arrives.
 import { mat4 } from 'gl-matrix';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { startFrames } from './support/xr-frames.js';
 import type { HoloWebGlobal } from '../src/index.js';
 import { mockHand } from '../src/mock-hands.js';
 
@@ -53,7 +54,7 @@ describe('immersive-vr + hand-tracking', () => {
       expect(request).toMatchObject({ mode: 'immersive-vr' });
       expect(request.features).toContain('hand-tracking');
 
-      session.updateRenderState({ layers: [{}] });
+      startFrames(session);
       hw.onFrame(performance.now(), 'mono', Array.from(mat4.create()), Array.from(mat4.create()), Array.from(mat4.perspective(mat4.create(), 1, 2, 0.01, 100)), null, 'normal');
       await nextFrame(session);
       hw.onHands({ t: 1000, hands: [mockHand(mat4.create(), 1200)] });

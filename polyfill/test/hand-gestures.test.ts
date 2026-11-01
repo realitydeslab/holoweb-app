@@ -3,6 +3,7 @@
 // grab, grip at the palm centre.
 import { mat4, vec3 } from 'gl-matrix';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { startFrames } from './support/xr-frames.js';
 import { curlRatio, palmCenter, pinchState, SQUEEZE_OFF, SQUEEZE_ON, squeezeState } from '../src/hands.js';
 import type { HoloWebGlobal } from '../src/index.js';
 import { mockHandCameraSpace } from '../src/mock-hands.js';
@@ -100,7 +101,7 @@ const send = (...hands: ReturnType<typeof hand>[]) => hw.onHands({ t: (clock += 
 
 async function start(): Promise<{ session: Session; local: unknown; events: string[] }> {
   const session = await xr().requestSession('immersive-ar', { optionalFeatures: ['hand-tracking'] });
-  session.updateRenderState({ layers: [{}] });
+  startFrames(session);
   hw.onFrame(performance.now(), 'mono', Array.from(identity), Array.from(identity), Array.from(mat4.perspective(mat4.create(), 1, 2, 0.01, 100)), null, 'normal');
   const local = await session.requestReferenceSpace('local');
   await inFrame(session);

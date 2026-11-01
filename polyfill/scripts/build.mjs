@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const SIZE_BUDGET = 250 * 1024;
+// 260 KB since IWER 2.7.0 (PR #208): its WebGPU binding, layers and compositor add ~49 KB minified.
+const SIZE_BUDGET = 260 * 1024;
 
 // IWER imports webxr-layers-polyfill statically but only instantiates it for
 // installRuntime({ polyfillLayers: true }), which HoloWeb never passes.
@@ -31,7 +32,7 @@ const common = {
   platform: 'browser',
   target: ['safari17', 'chrome120'],
   legalComments: 'eof',
-  banner: { js: '/* HoloWeb WebXR polyfill. Includes IWER 2.4.0 (MIT, Meta Platforms) and gl-matrix (MIT). */' },
+  banner: { js: '/* HoloWeb WebXR polyfill. Includes IWER 2.7.0 from PR #208 (MIT, Meta Platforms) and gl-matrix (MIT). */' },
   logLevel: 'warning',
 };
 

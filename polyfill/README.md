@@ -3,17 +3,18 @@
 WebXR runtime that the HoloWeb iOS app injects into its WKWebView. It installs `navigator.xr`
 (`immersive-ar` + `inline`), feeds it ARKit poses through the native bridge
 (`plan/bridge_protocol.md`), and renders in mono (handheld) or HoloKit X stereo.
-WebGL pages use `XRWebGLLayer`; WebGPU pages use the `XRGPUBinding` polyfill.
+WebGL pages use `XRWebGLLayer`; WebGPU pages use IWER's `XRGPUBinding` (IWER 2.7.0 built from
+[PR #208](https://github.com/meta-quest/immersive-web-emulation-runtime/pull/208)).
 
-Output: `dist/holoweb-polyfill.js` (minified IIFE, ~154 KB, ~48 KB gzip) and
+Output: `dist/holoweb-polyfill.js` (minified IIFE, ~252 KB, ~79 KB gzip) and
 `dist/holoweb-polyfill.dev.js` (unminified, inline source map). Native loads the minified file
 as a `WKUserScript` at document start, main frame only, page world.
 
 ## Commands
 
 ```bash
-npm install          # also applies patches/iwer+2.4.0.patch (postinstall: patch-package)
-npm run build        # dist/*.js, fails if > 250 KB or if IWER remote/native code is bundled
+npm install          # also applies patches/iwer+2.7.0.patch (postinstall: patch-package)
+npm run build        # dist/*.js, fails if > 260 KB or if IWER remote/native code is bundled
 npm test             # vitest: stereo golden values, bridge + session behaviour (happy-dom)
 npm run typecheck    # tsc --noEmit, strict
 npm run test:e2e     # headless Chromium against mock-native: examples in mono/stereo, native toggles, rotation,
@@ -47,43 +48,56 @@ and `?holoweb-model=iPhone17,1` override the mock.
 | `src/reflection.ts` | `XRWebGLBinding.getReflectionCubeMap` from `onEnvironment`, `reflectionchange` |
 | `src/input.ts` | Screen tap -> transient `screen` (mono) / `gaze` (stereo) input source, `select` events |
 | `src/webgl-layer.ts` | Non-null opaque `XRWebGLLayer.framebuffer` + fixed framebuffer size |
-| `src/gpu-binding.ts`, `src/gpu-presenter.ts` | `XRGPUBinding`, projection layer, copy-to-canvas presenter |
+| `src/gpu-binding.ts` | Adapts IWER's `XRGPUBinding` and WebGPU compositor: native-size layers and canvas, three.js priming view, 0x0 inert sub-image |
 | `src/hands.ts`, `src/hand-input.ts` | WebXR Hand Input from native Vision + LiDAR joints (`onHands`), pinch -> select |
 | `src/mock-native.ts`, `src/mock-hands.ts` | Desktop stand-in for the iOS app (incl. a synthetic pinching hand) |
 | `src/webkit.ts` | Typed `window.webkit` shim (the only untyped boundary) |
 
 ## Why patch-package over vendoring IWER
 
-IWER 2.4.0 ships compiled ES modules plus `.d.ts` in `lib/`. The HoloWeb changes are 110 changed
-lines across 7 files; vendoring would copy ~60 modules (plus the 3.9k-line native override) into
-this repo for review. With patch-package the whole fork is one reviewable file,
-`patches/iwer+2.4.0.patch`, re-applied on every install. Rebasing onto a new IWER version is to bump
-the pin, run `npm install`, fix rejected hunks, and run `npx patch-package iwer`. Every patched line
-carries a `HOLOWEB:` comment. Everything that can be done from outside (see below) is kept out of
-the patch.
+IWER ships compiled ES modules plus `.d.ts` in `lib/`. With patch-package the whole fork is one
+reviewable file, `patches/iwer+2.7.0.patch` (6 files, every hunk tagged `HOLOWEB:`), re-applied on
+every install. Everything that can be done from outside (see below) is kept out of the patch.
+
+The `iwer` dependency is `file:vendor/iwer-2.7.0-pr208.tgz`: IWER 2.7.0 from PR #208 (WebXR/WebGPU
+binding, WebGPU layers and compositor), not yet on npm. `scripts/build-iwer.sh` rebuilds the tarball from
+the pinned PR commit (`ce99bce`). Because that version is not on the registry, `npx patch-package iwer`
+cannot regenerate the patch: edit `node_modules/iwer/lib` and run `scripts/iwer-patch.sh`, which diffs it
+against the tarball. Once the PR ships in an npm release, pin that release, move the patch to its
+version, and delete both scripts.
 
 devui, sem and remote are excluded: devui/sem are separate packages we never import; the patch
 removes the `RemoteControlInterface` construction from `XRDevice`, and the build fails if any
 `iwer/lib/remote` or `iwer/lib/native` byte reaches the bundle. `webxr-layers-polyfill` is stubbed
 at build time (IWER only uses it for `installRuntime({ polyfillLayers: true })`), saving 60 KB.
 
-## Patches (patches/iwer+2.4.0.patch)
+## Patches (patches/iwer+2.7.0.patch)
 
 1. **Per-eye projection override**: `XRDevice.nativeProjection: Partial<Record<'left'|'right'|'none', Float32Array>>`.
    The frame tick copies the override and rewrites entries [10] and [14] from `renderState.depthNear/depthFar`
-   (infinite far supported), in the immersive and inline paths.
+   (infinite far supported) for a [-1, 1] clip depth range, or [0, 1] in a `'webgpu'` session, as
+   the WebXR/WebGPU binding requires.
 2. **Per-eye viewport override**: `XRDevice.nativeViewports` (framebuffer pixels, bottom-left origin); `getViewport` uses it when present.
 3. **Mono immersive = one view**: an immersive session with `stereoEnabled = false` returns one `'none'`
    view (handheld AR), not IWER's left eye plus a zero-width right eye.
-4. **Layers render state**: `updateRenderState({ layers })`, `renderState.layers`, and a frame loop that runs
-   for a layers-only session (no `baseLayer`); `baseLayer` + `layers` together throws `NotSupportedError`.
-5. **`onFrameEnd` device hook**, called after the page's XR callbacks (used by the XRGPUBinding presenter).
+4. **WebGPU compositor at native size**: a `presentationSize()` device hook (default
+   `innerWidth x innerHeight`) sizes IWER's layer canvas and view regions; each eye is drawn at its
+   `nativeViewports` rect, and mono shows the single `'none'` view.
+5. **`onFrameEnd` device hook**, called after the page's XR callbacks and IWER's layer composition
+   (the `rendered` report and the priming count use it).
 6. **Remote control removed** from `XRDevice` (bundle size).
 7. **`XRRay.matrix` fix**: upstream built the rotation axis as `direction x -Z`, which points non-default
    rays the wrong way (for example a straight-down ray becomes straight up). Changed to `-Z x direction`.
-8. Types: `WebXRFeature` gains `'light-estimation' | 'webgpu'`.
+8. Types: `WebXRFeature` gains `'light-estimation'`.
 9. **Full-framebuffer clear**: the per-frame immersive clear disables a page-left `SCISSOR_TEST` for the clear, so
    a former right-eye region cannot survive a stereo -> mono switch.
+10. **Head gaze is ordinary input**: IWER 2.7 drops every `targetRayMode 'gaze'` source unless the session
+    has `'gaze-tracking'`; only its emulated eye gaze needs that, so HoloKit's tap-to-select gaze ray stays.
+
+Upstream 2.7.0 now has what patches 4 and 8 of the 2.4.0 patch added: the layers render state
+(WebGPU sessions only, as the spec requires), the `baseLayer` / `layers` exclusion and the `'webgpu'` feature.
+IWER grants `'webgpu'` only when `navigator.gpu.requestAdapter()` returns an adapter, and a `'webgpu'`
+session refuses `XRWebGLLayer`, so a page should request `'webgpu'` only when it renders with WebGPU.
 
 Requirement 3 of the task (installRuntime without native `navigator.xr`, `immersive-ar` support,
 optional features and `enabledFeatures` echo including `webgpu`) needed no patch: it follows from

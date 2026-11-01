@@ -1,0 +1,373 @@
+diff --git a/node_modules/iwer/lib/device/XRDevice.d.ts b/node_modules/iwer/lib/device/XRDevice.d.ts
+index 9302bc8..bd9d156 100644
+--- a/node_modules/iwer/lib/device/XRDevice.d.ts
++++ b/node_modules/iwer/lib/device/XRDevice.d.ts
+@@ -28,7 +28,7 @@ import { NativeMesh } from '../meshes/XRMesh.js';
+ import type { DepthSensingData } from '../depth/XRDepthInformation.js';
+ import type { XRRuntimeAdapter } from '../types/runtime-session.js';
+ import { type XRVisibilityMask } from './XRVisibilityMask.js';
+-export type WebXRFeature = 'viewer' | 'local' | 'local-floor' | 'bounded-floor' | 'unbounded' | 'dom-overlay' | 'anchors' | 'plane-detection' | 'mesh-detection' | 'hit-test' | 'hand-tracking' | 'gaze-tracking' | 'eye-tracking' | 'depth-sensing' | 'webgpu' | 'layers' | 'space-warp';
++export type WebXRFeature = 'viewer' | 'local' | 'local-floor' | 'bounded-floor' | 'unbounded' | 'dom-overlay' | 'anchors' | 'plane-detection' | 'mesh-detection' | 'hit-test' | 'hand-tracking' | 'gaze-tracking' | 'eye-tracking' | 'depth-sensing' | 'light-estimation' | 'webgpu' | 'layers' | 'space-warp';
+ export interface XRDeviceConfig {
+     name: string;
+     controllerConfig: XRControllerConfig | undefined;
+@@ -140,6 +140,18 @@ export declare class XRDevice {
+         stereoEnabled: boolean;
+         ipd: number;
+         fovy: number;
++        nativeProjection: Partial<Record<XREye, Float32Array>>;
++        nativeViewports: Partial<Record<XREye, {
++            x: number;
++            y: number;
++            width: number;
++            height: number;
++        }>>;
++        onFrameEnd: ((frame: XRFrame) => void) | undefined;
++        presentationSize: () => {
++            width: number;
++            height: number;
++        };
+         visibilityMask?: XRVisibilityMask;
+         visibilityMaskEnabled: boolean;
+         visibilityMaskCanvas?: HTMLCanvasElement;
+@@ -201,7 +213,7 @@ export declare class XRDevice {
+         controlMode: ControlMode;
+         controlModeListeners: Set<(mode: ControlMode) => void>;
+         stateChangeListeners: Set<() => void>;
+-        remote: RemoteControlInterface;
++        remote: RemoteControlInterface | null;
+         runtime: XRRuntimeAdapter;
+         lastFrameTime: number;
+     };
+@@ -234,6 +246,13 @@ export declare class XRDevice {
+     set ipd(value: number);
+     get fovy(): number;
+     set fovy(value: number);
++    get nativeProjection(): Partial<Record<XREye, Float32Array>>;
++    get nativeViewports(): Partial<Record<XREye, {
++        x: number;
++        y: number;
++        width: number;
++        height: number;
++    }>>;
+     get visibilityMask(): XRVisibilityMask | undefined;
+     /**
+      * Whether this device's configured visibility mask is currently displayed.
+@@ -284,7 +303,7 @@ export declare class XRDevice {
+     createActionPlayer(refSpace: XRReferenceSpace, recording: CompressedRecording, options?: ActionPlayerOptions): ActionPlayer;
+     get devui(): DevUI | undefined;
+     get sem(): SyntheticEnvironmentModule | undefined;
+-    get remote(): RemoteControlInterface;
++    get remote(): RemoteControlInterface | null;
+     /**
+      * Get the current control mode
+      * - 'manual': User controls device via DevUI (default)
+diff --git a/node_modules/iwer/lib/device/XRDevice.js b/node_modules/iwer/lib/device/XRDevice.js
+index 58587b7..c038ad0 100644
+--- a/node_modules/iwer/lib/device/XRDevice.js
++++ b/node_modules/iwer/lib/device/XRDevice.js
+@@ -9,7 +9,7 @@ import { GamepadButton } from '../gamepad/Gamepad.js';
+ import { resetButton } from '../gamepad/button-edges.js';
+ import { P_DEVICE, P_REF_SPACE, P_SESSION, P_SPACE, P_SYSTEM, } from '../private.js';
+ import { Quaternion, Vector3 } from '../utils/Math.js';
+-import { RemoteControlInterface } from '../remote/RemoteControlInterface.js';
++// HOLOWEB: remote control interface removed from the core bundle
+ import { XRController } from './XRController.js';
+ import { XRSession, } from '../session/XRSession.js';
+ import { XREye, XRView } from '../views/XRView.js';
+@@ -134,6 +134,12 @@ export class XRDevice {
+             stereoEnabled: (_e = deviceOptions.stereoEnabled) !== null && _e !== void 0 ? _e : DEFAULTS.stereoEnabled,
+             ipd: (_f = deviceOptions.ipd) !== null && _f !== void 0 ? _f : DEFAULTS.ipd,
+             fovy: (_g = deviceOptions.fovy) !== null && _g !== void 0 ? _g : DEFAULTS.fovy,
++            // HOLOWEB: per-eye projection / viewport overrides supplied by the host
++            nativeProjection: {},
++            nativeViewports: {},
++            onFrameEnd: undefined,
++            // HOLOWEB: pixel size of IWER's WebGPU layer canvas (the host sets the native framebuffer size)
++            presentationSize: () => ({ width: window.innerWidth, height: window.innerHeight }),
+             visibilityMask,
+             visibilityMaskEnabled: Boolean(visibilityMask) &&
+                 ((_h = deviceOptions.visibilityMaskEnabled) !== null && _h !== void 0 ? _h : true),
+@@ -186,6 +192,11 @@ export class XRDevice {
+                         vpHeight = height;
+                         break;
+                 }
++                // HOLOWEB: host-supplied viewport rect (framebuffer pixels) wins
++                const nativeViewport = this[P_DEVICE].nativeViewports[eye];
++                if (nativeViewport) {
++                    ({ x, y, width: vpWidth, height: vpHeight } = nativeViewport);
++                }
+                 // cache per (eye, width, height, stereoEnabled): return the cached
+                 // instance unless one of those changed
+                 const cached = this[P_DEVICE].viewportCache[eye];
+@@ -392,7 +403,7 @@ export class XRDevice {
+                 };
+             },
+         };
+-        this[P_DEVICE].remote = new RemoteControlInterface(this);
++        this[P_DEVICE].remote = null;
+         this[P_DEVICE].updateViews();
+         globalThis;
+     }
+@@ -639,6 +650,13 @@ export class XRDevice {
+     set fovy(value) {
+         this[P_DEVICE].fovy = value;
+     }
++    // HOLOWEB: per-eye overrides, see XRSession updateProjectionMatrices and getViewport
++    get nativeProjection() {
++        return this[P_DEVICE].nativeProjection;
++    }
++    get nativeViewports() {
++        return this[P_DEVICE].nativeViewports;
++    }
+     get visibilityMask() {
+         return this[P_DEVICE].visibilityMask;
+     }
+diff --git a/node_modules/iwer/lib/frameloop/XRFrame.js b/node_modules/iwer/lib/frameloop/XRFrame.js
+index fd2aa03..3e6ade7 100644
+--- a/node_modules/iwer/lib/frameloop/XRFrame.js
++++ b/node_modules/iwer/lib/frameloop/XRFrame.js
+@@ -82,7 +82,10 @@ export class XRFrame {
+         const session = this[P_FRAME].session;
+         const device = session[P_SESSION].device;
+         const pose = this.getPose(device.viewerSpace, referenceSpace);
+-        const eyes = session[P_SESSION].mode === 'inline' ? INLINE_EYES : STEREO_EYES;
++        // HOLOWEB: a mono immersive session (handheld AR) has one 'none' view
++        const eyes = session[P_SESSION].mode === 'inline' || !device.stereoEnabled
++            ? INLINE_EYES
++            : STEREO_EYES;
+         const views = [];
+         eyes.forEach((eye) => {
+             const viewSpace = device.viewSpaces[eye];
+diff --git a/node_modules/iwer/lib/hittest/XRRay.js b/node_modules/iwer/lib/hittest/XRRay.js
+index eafdd9e..4d7921f 100644
+--- a/node_modules/iwer/lib/hittest/XRRay.js
++++ b/node_modules/iwer/lib/hittest/XRRay.js
+@@ -31,20 +31,29 @@ export class XRRay {
+         }
+         else {
+             if (origin) {
+-                _origin.x = origin.x;
+-                _origin.y = origin.y;
+-                _origin.z = origin.z;
+-                _origin.w = origin.w;
++                // HOLOWEB: DOMPointInit defaults (x, y, z 0; w 1); the spec requires origin.w == 1
++                _origin.x = origin.x ?? 0;
++                _origin.y = origin.y ?? 0;
++                _origin.z = origin.z ?? 0;
++                _origin.w = origin.w ?? 1;
++                if (_origin.w !== 1) {
++                    throw new TypeError("Origin's `w` component must be set to 1.0f!");
++                }
+             }
+             if (direction) {
+-                if ((direction.x === 0 && direction.y === 0 && direction.z === 0) ||
+-                    direction.w !== 0) {
+-                    throw new DOMException('Invalid direction value to construct XRRay', 'TypeError');
++                // HOLOWEB: XRRayDirectionInit defaults (x 0, y 0, z -1, w 0) and checks as in the hit-test
++                // spec and Chromium's xr_ray.cc (a DOMPoint, w 1, is rejected there too)
++                const d = { x: direction.x ?? 0, y: direction.y ?? 0, z: direction.z ?? -1, w: direction.w ?? 0 };
++                if (d.x === 0 && d.y === 0 && d.z === 0) {
++                    throw new TypeError('Unable to normalize vector of length 0.');
++                }
++                if (d.w !== 0) {
++                    throw new TypeError("Direction's `w` component must be set to 0.0f!");
+                 }
+-                _direction.x = direction.x;
+-                _direction.y = direction.y;
+-                _direction.z = direction.z;
+-                _direction.w = direction.w;
++                _direction.x = d.x;
++                _direction.y = d.y;
++                _direction.z = d.z;
++                _direction.w = d.w;
+             }
+         }
+         const length = Math.sqrt(_direction.x * _direction.x +
+@@ -72,7 +81,8 @@ export class XRRay {
+         const z = vec3.set(vec3.create(), 0, 0, -1);
+         const origin = vec3.set(vec3.create(), this[P_RAY].origin.x, this[P_RAY].origin.y, this[P_RAY].origin.z);
+         const direction = vec3.set(vec3.create(), this[P_RAY].direction.x, this[P_RAY].direction.y, this[P_RAY].direction.z);
+-        const axis = vec3.cross(vec3.create(), direction, z);
++        // HOLOWEB: rotate -Z onto direction (upstream used direction x z, which flips non-default rays)
++        const axis = vec3.cross(vec3.create(), z, direction);
+         const cosAngle = vec3.dot(direction, z);
+         const rotation = mat4.create();
+         if (cosAngle > -1 && cosAngle < 1) {
+diff --git a/node_modules/iwer/lib/layers/XRGPUPresenter.js b/node_modules/iwer/lib/layers/XRGPUPresenter.js
+index b0c3470..7dcec12 100644
+--- a/node_modules/iwer/lib/layers/XRGPUPresenter.js
++++ b/node_modules/iwer/lib/layers/XRGPUPresenter.js
+@@ -474,6 +474,9 @@ export class XRGPUPresenter {
+         let surface = this.surfaces[index];
+         if (!surface) {
+             const canvas = document.createElement('canvas');
++            // HOLOWEB: the canvas has presentationSize() pixels; CSS fits it to the container
++            canvas.style.width = '100%';
++            canvas.style.height = '100%';
+             surface = {
+                 canvas,
+                 context: canvas.getContext('webgpu'),
+@@ -501,18 +504,22 @@ export class XRGPUPresenter {
+     viewRegions(session) {
+         const xrDevice = this.xrDevice;
+         const stereo = xrDevice.stereoEnabled;
+-        const width = window.innerWidth;
+-        // Like the WebGL viewports, mono shows only the left view.
+-        const eyes = stereo ? [XREye.Left, XREye.Right] : [XREye.Left];
++        // HOLOWEB: regions in presentationSize() pixels; mono shows the single 'none' view
++        const { width, height } = xrDevice[P_DEVICE].presentationSize();
++        const eyes = stereo ? [XREye.Left, XREye.Right] : [XREye.None];
+         return eyes.map((eye, eyeIndex) => {
+             var _a;
+             const view = (_a = mat4.invert(mat4.create(), XRSpaceUtils.calculateGlobalOffsetMatrix(xrDevice.viewSpaces[eye]))) !== null && _a !== void 0 ? _a : mat4.create();
+             const projection = session[P_SESSION].getProjectionMatrix(eye);
++            const native = xrDevice[P_DEVICE].nativeViewports[eye];
+             return {
+                 eye,
+                 eyeIndex,
+-                x: stereo ? (eyeIndex * width) / 2 : 0,
+-                width: stereo ? width / 2 : width,
++                // HOLOWEB: a host viewport rect (framebuffer pixels, bottom-left origin) wins
++                x: native ? native.x : stereo ? (eyeIndex * width) / 2 : 0,
++                y: native ? height - native.y - native.height : 0,
++                width: native ? native.width : stereo ? width / 2 : width,
++                height: native ? native.height : height,
+                 projection,
+                 layerProjection: layerProjection(projection),
+                 view,
+@@ -524,11 +531,13 @@ export class XRGPUPresenter {
+         var _a;
+         const device = layers[0][P_COMPOSITION_LAYER].textures.device;
+         const { canvas } = surface;
+-        if (canvas.width !== window.innerWidth) {
+-            canvas.width = window.innerWidth;
++        // HOLOWEB: canvas at the host's presentation size (native framebuffer pixels)
++        const size = this.xrDevice[P_DEVICE].presentationSize();
++        if (canvas.width !== size.width) {
++            canvas.width = size.width;
+         }
+-        if (canvas.height !== window.innerHeight) {
+-            canvas.height = window.innerHeight;
++        if (canvas.height !== size.height) {
++            canvas.height = size.height;
+         }
+         const context = surface.context;
+         if (!context) {
+@@ -584,7 +593,16 @@ export class XRGPUPresenter {
+             ],
+         });
+         draws.forEach((draw, index) => {
+-            pass.setViewport(draw.region.x, 0, draw.region.width, canvas.height, 0, 1);
++            // HOLOWEB: WebGPU rejects a viewport outside the attachment (the whole pass fails);
++            // clamp host eye rects, which can overhang the screen on narrow phones, to the canvas
++            const x = Math.min(Math.max(draw.region.x, 0), canvas.width);
++            const y = Math.min(Math.max(draw.region.y, 0), canvas.height);
++            const width = Math.min(draw.region.x + draw.region.width, canvas.width) - x;
++            const height = Math.min(draw.region.y + draw.region.height, canvas.height) - y;
++            if (width <= 0 || height <= 0) {
++                return;
++            }
++            pass.setViewport(x, y, width, height, 0, 1);
+             pass.setPipeline(draw.pipeline);
+             pass.setBindGroup(0, entry.drawBindGroup, [index * DRAW_STRIDE]);
+             pass.setBindGroup(1, draw.textureGroup);
+diff --git a/node_modules/iwer/lib/session/XRSession.js b/node_modules/iwer/lib/session/XRSession.js
+index 7004606..2da8e49 100644
+--- a/node_modules/iwer/lib/session/XRSession.js
++++ b/node_modules/iwer/lib/session/XRSession.js
+@@ -28,6 +28,23 @@ import { XRGPUPresenter } from '../layers/XRGPUPresenter.js';
+ import { XRCompositionLayer, XRProjectionLayer, } from '../layers/XRProjectionLayer.js';
+ import { XRLayer, XRWebGLLayer } from '../layers/XRWebGLLayer.js';
+ import { mat4 } from 'gl-matrix';
++// HOLOWEB: copy a host projection and rebuild its depth terms from depthNear/depthFar,
++// for a [-1, 1] (WebGL) or [0, 1] (WebGPU) clip depth range
++const applyNativeProjection = (out, src, near, far, zeroToOne) => {
++    out.set(src);
++    if (zeroToOne) {
++        out[10] = far === Infinity ? -1 : far / (near - far);
++        out[14] = far === Infinity ? -near : (far * near) / (near - far);
++    }
++    else if (far === Infinity) {
++        out[10] = -1;
++        out[14] = -2 * near;
++    }
++    else {
++        out[10] = -(far + near) / (far - near);
++        out[14] = (-2 * far * near) / (far - near);
++    }
++};
+ // The most layers a render state can hold (XRSession.maxRenderLayers).
+ const MAX_RENDER_LAYERS = 16;
+ // Maps clip-space z from WebGPU's [0, 1] depth range to WebGL's [-1, 1].
+@@ -136,11 +153,20 @@ export class XRSession extends EventTarget {
+                         : mat4.perspective;
+                     perspective(this[P_SESSION].projectionMatrices[XREye.Left], this[P_SESSION].device.fovy, aspect, depthNear, depthFar);
+                     mat4.copy(this[P_SESSION].projectionMatrices[XREye.Right], this[P_SESSION].projectionMatrices[XREye.Left]);
++                    mat4.copy(this[P_SESSION].projectionMatrices[XREye.None], this[P_SESSION].projectionMatrices[XREye.Left]);
+                 }
+                 else {
+                     const aspect = width / height;
+                     mat4.perspective(this[P_SESSION].projectionMatrices[XREye.None], this[P_SESSION].renderState.inlineVerticalFieldOfView, aspect, depthNear, depthFar);
+                 }
++                // HOLOWEB: host-supplied per-eye projections replace the symmetric default
++                const nativeProjection = this[P_SESSION].device[P_DEVICE].nativeProjection;
++                for (const eye of [XREye.Left, XREye.Right, XREye.None]) {
++                    const src = nativeProjection[eye];
++                    if (src) {
++                        applyNativeProjection(this[P_SESSION].projectionMatrices[eye], src, depthNear, depthFar, this[P_SESSION].hasWebGPU);
++                    }
++                }
+             },
+             enabledFeatures: enabledFeatures,
+             hasAnchors: enabledFeatures.includes('anchors'),
+@@ -252,12 +278,19 @@ export class XRSession extends EventTarget {
+                     const currentClearColor = context.getParameter(context.COLOR_CLEAR_VALUE);
+                     const currentClearDepth = context.getParameter(context.DEPTH_CLEAR_VALUE);
+                     const currentClearStencil = context.getParameter(context.STENCIL_CLEAR_VALUE);
++                    // HOLOWEB: clear the whole framebuffer even if the page left a per-eye scissor enabled
++                    // (otherwise a former right-eye region survives a stereo -> mono switch)
++                    const scissorTest = context.isEnabled(context.SCISSOR_TEST);
++                    if (scissorTest)
++                        context.disable(context.SCISSOR_TEST);
+                     context.clearColor(0.0, 0.0, 0.0, 0.0);
+                     context.clearDepth(1);
+                     context.clearStencil(0.0);
+                     context.clear(context.DEPTH_BUFFER_BIT |
+                         context.COLOR_BUFFER_BIT |
+                         context.STENCIL_BUFFER_BIT);
++                    if (scissorTest)
++                        context.enable(context.SCISSOR_TEST);
+                     context.clearColor(currentClearColor[0], currentClearColor[1], currentClearColor[2], currentClearColor[3]);
+                     context.clearDepth(currentClearDepth);
+                     context.clearStencil(currentClearStencil);
+@@ -330,6 +363,16 @@ export class XRSession extends EventTarget {
+                         layer[P_COMPOSITION_LAYER].textures.releasedMotion);
+                     this[P_SESSION].spaceWarpFrame = submitted ? frame : null;
+                 }
++                // HOLOWEB: host hook after the app's callbacks and layer presentation
++                const onFrameEnd = this[P_SESSION].device[P_DEVICE].onFrameEnd;
++                if (onFrameEnd) {
++                    try {
++                        onFrameEnd(frame);
++                    }
++                    catch (err) {
++                        console.error(err);
++                    }
++                }
+                 // WebGPU depth textures are only valid during their frame.
+                 for (const texture of frame[P_FRAME].webgpuDepthTextures) {
+                     texture.destroy();
+@@ -348,8 +391,11 @@ export class XRSession extends EventTarget {
+                 const handTrackingOn = this[P_SESSION].enabledFeatures.includes('hand-tracking');
+                 const gazeTrackingOn = this[P_SESSION].hasGazeTracking;
+                 const prevInputs = this[P_SESSION].activeInputSources;
++                // HOLOWEB: only IWER's emulated eye gaze needs 'gaze-tracking'; head-gaze sources
++                // (HoloKit's transient select ray, targetRayMode 'gaze') are ordinary input
++                const eyeGaze = this[P_SESSION].device[P_DEVICE].gaze?.inputSource;
+                 const currInputs = this[P_SESSION].device.inputSources.filter((inputSource) => (!inputSource.hand || handTrackingOn) &&
+-                    (inputSource.targetRayMode !== 'gaze' || gazeTrackingOn));
++                    (inputSource !== eyeGaze || gazeTrackingOn));
+                 const added = currInputs.filter((item) => !prevInputs.includes(item));
+                 const removed = prevInputs.filter((item) => !currInputs.includes(item));
+                 this[P_SESSION].activeInputSources = currInputs;

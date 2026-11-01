@@ -52,17 +52,17 @@ mimicWKWebView(browser); // no Chromium WebXR: the polyfill must supply every gl
 const cases = process.env.HOLOWEB_E2E_ONLY === 'samples' ? [] : [
   { page: 'three-ar.html', mode: 'mono', backend: 'webgl', views: 1 },
   { page: 'three-ar.html', mode: 'stereo', backend: 'webgl', views: 2 },
-  { page: 'three-ar-webgpu.html', mode: 'mono', backend: 'webgpu', views: 1, path: 'copy' },
-  { page: 'three-ar-webgpu.html', mode: 'stereo', backend: 'webgpu', views: 2, path: 'copy' },
+  { page: 'three-ar-webgpu.html', mode: 'mono', backend: 'webgpu', views: 1 },
+  { page: 'three-ar-webgpu.html', mode: 'stereo', backend: 'webgpu', views: 2 },
   // native toggle mid-session (Start AR in mono, then the top-right button): session keeps running,
   // the view count follows the mode after every switch
   { page: 'three-ar.html', mode: 'mono', toggle: ['stereo', 'mono', 'stereo'], backend: 'webgl', views: 2 },
   { page: 'three-ar-webgpu.html', mode: 'mono', toggle: ['stereo', 'mono', 'stereo'], backend: 'webgpu', views: 2 },
-  // eye rects change size under an existing layer (late device info): presenter's scaling blit
-  { page: 'three-ar-webgpu.html', mode: 'stereo', lateModel: 'iPhone14,2', backend: 'webgpu', views: 2, path: 'blit' },
+  // eye rects change size under an existing layer (late device info): the compositor scales the layer
+  { page: 'three-ar-webgpu.html', mode: 'stereo', lateModel: 'iPhone14,2', backend: 'webgpu', views: 2 },
   // rotation to portrait mid-session: fixed-size targets, presentation rescales (reticle must stay centred)
   { page: 'three-ar.html', mode: 'mono', rotate: true, backend: 'webgl', views: 1 },
-  { page: 'three-ar-webgpu.html', mode: 'mono', rotate: true, backend: 'webgpu', views: 1, path: 'blit' },
+  { page: 'three-ar-webgpu.html', mode: 'mono', rotate: true, backend: 'webgpu', views: 1 },
 ];
 
 let failures = 0;
@@ -127,8 +127,12 @@ for (const c of cases) {
     await page.waitForFunction(() => window.__arStatus.anchors > 0, null, { timeout: 5000 }).catch(() => undefined);
     await page.waitForFunction(() => window.__arStatus.xrFrames > 60, null, { timeout: 5000 });
     const status = await page.evaluate(() => window.__arStatus);
-    const path = await page.evaluate(() => document.querySelector('[data-holoweb=xr-gpu-presenter]')?.dataset.path ?? 'none');
-    if (c.path && path !== c.path) problems.push(`presenter path ${path}, expected ${c.path}`);
+    // IWER's WebGPU compositor canvas: present for WebGPU pages, at the native framebuffer size
+    const compositor = await page.evaluate(() => {
+      const canvas = document.querySelector('[data-holoweb=xr-gpu-presenter]');
+      const native = `${Math.round(innerWidth * devicePixelRatio)}x${Math.round(innerHeight * devicePixelRatio)}`;
+      return { size: canvas ? `${canvas.width}x${canvas.height}` : 'none', native };
+    });
     const png = await page.screenshot();
     const shot = `${c.page.replace('.html', '')}-${c.mode}${c.toggle ? '-toggled' : ''}${c.lateModel ? '-late-model' : ''}${c.rotate ? '-rotated' : ''}.png`;
     await writeFile(join(shotDir, shot), png);
@@ -164,11 +168,14 @@ for (const c of cases) {
     if (status.anchors < 1) problems.push('no tracked anchor after placing');
     if (!status.light || !(status.light.sh0 > 0)) problems.push('no light estimate');
     if (c.backend === 'webgpu' && !status.sessionFeatures.includes('webgpu')) problems.push('webgpu feature missing');
+    if (expectBackend === 'webgpu' && compositor.size !== compositor.native) {
+      problems.push(`compositor canvas ${compositor.size}, expected native ${compositor.native}`);
+    }
     problems.push(...status.errors.map((e) => `page error: ${e}`));
     console.log(
       `${problems.length ? 'FAIL' : 'PASS'} ${label}: backend=${status.backend} gpuAdapter=${gpu} views=${status.views} ` +
         `xrFrames=${status.xrFrames} hitFrames=${status.hitFrames} placed=${status.placed} anchors=${status.anchors} ` +
-        `light=${JSON.stringify(status.light)} reticlePx=${reticlePixels} presenter=${path}`,
+        `light=${JSON.stringify(status.light)} reticlePx=${reticlePixels} compositor=${compositor.size}`,
     );
   } catch (err) {
     problems.push(String(err.message ?? err).split('\n')[0]);
@@ -226,8 +233,11 @@ for (const c of cases) {
       if (frames < 20) problems.push(`${mode}: XR loop stalled (${frames} frames)`);
       if (views !== (seenStereo ? 2 : 1)) problems.push(`${mode}: ${views} views`);
     }
-    const presenter = await page.evaluate(() => document.querySelector('[data-holoweb=xr-gpu-presenter]')?.dataset.path ?? 'none');
-    if (presenter === 'none') problems.push('WebGPU presenter never ran');
+    const presenter = await page.evaluate(() => {
+      const canvas = document.querySelector('[data-holoweb=xr-gpu-presenter]');
+      return canvas ? `${canvas.width}x${canvas.height}` : 'none';
+    });
+    if (presenter === 'none') problems.push('WebGPU compositor never ran');
     await writeFile(join(shotDir, 'demo-toggled.png'), await page.screenshot());
     console.log(`${problems.length ? 'FAIL' : 'PASS'} demo.html [autostart mono -> stereo -> mono -> stereo]: phases ${phases.join(' ')} presenter=${presenter}`);
   } catch (err) {

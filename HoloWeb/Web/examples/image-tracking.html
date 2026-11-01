@@ -42,7 +42,9 @@
       addEventListener('unhandledrejection', (e) => status.errors.push(String(e.reason)));
       const stateText = document.getElementById('state');
 
-      const renderer = new THREE.WebGPURenderer({ antialias: true, alpha: true, forceWebGL: params.get('backend') === 'webgl' });
+      // 'webgpu' only for the WebGPU backend: a session with it refuses XRWebGLLayer (WebXR/WebGPU binding)
+      const forceWebGL = params.get('backend') === 'webgl';
+      const renderer = new THREE.WebGPURenderer({ antialias: true, alpha: true, forceWebGL });
       renderer.setPixelRatio(devicePixelRatio);
       renderer.setSize(innerWidth, innerHeight);
       renderer.xr.enabled = true;
@@ -70,7 +72,7 @@
       const bitmap = await createImageBitmap(image);
       const sessionInit = {
         requiredFeatures: ['image-tracking'],
-        optionalFeatures: ['dom-overlay', 'webgpu'],
+        optionalFeatures: ['dom-overlay', ...(forceWebGL ? [] : ['webgpu'])],
         domOverlay: { root: document.body },
         trackedImages: [{ image: bitmap, widthInMeters: MARKER_WIDTH_M }],
       };

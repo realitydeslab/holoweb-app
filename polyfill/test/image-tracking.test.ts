@@ -4,6 +4,7 @@
 // getImageTrackingResults (frozen, [SameObject] imageSpace, tracked | emulated, untrackable never listed).
 import { mat4 } from 'gl-matrix';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { startFrames } from './support/xr-frames.js';
 import type { HoloWebGlobal } from '../src/index.js';
 
 type Msg = Record<string, unknown> & { type: string };
@@ -104,7 +105,7 @@ describe('image-tracking: session setup', () => {
     try {
       expect(posted.some((m) => m.type === 'setTrackedImages')).toBe(false);
       await expect(session.getTrackedImageScores()).rejects.toMatchObject({ name: 'NotSupportedError' });
-      session.updateRenderState({ layers: [{}] });
+      startFrames(session);
       const err = await inFrame(session, (f) => { try { f.getImageTrackingResults(); return null; } catch (e) { return e as DOMException; } });
       expect(err?.name).toBe('NotSupportedError');
     } finally {
@@ -117,7 +118,7 @@ describe('image-tracking: frame results', () => {
   it('lists trackable images only, tracked | emulated, measured width, imageSpace at the native transform', async () => {
     const session = await xr().requestSession('immersive-ar', { requiredFeatures: ['image-tracking'], trackedImages: images() });
     try {
-      session.updateRenderState({ layers: [{}] });
+      startFrames(session);
       const local = await session.requestReferenceSpace('local');
       await session.getTrackedImageScores();
       // native sends imageSpace convention already (+Y image top, +Z toward viewer): used as is
@@ -158,7 +159,7 @@ describe('image-tracking: frame results', () => {
   it('throws InvalidStateError outside the frame callback', async () => {
     const session = await xr().requestSession('immersive-ar', { requiredFeatures: ['image-tracking'], trackedImages: images() });
     try {
-      session.updateRenderState({ layers: [{}] });
+      startFrames(session);
       const stale = await inFrame(session, (f) => f);
       expect(() => stale.getImageTrackingResults()).toThrow(expect.objectContaining({ name: 'InvalidStateError' }) as Error);
     } finally {

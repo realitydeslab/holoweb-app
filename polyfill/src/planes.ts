@@ -69,7 +69,8 @@ export class PlaneTracking {
       const tracked = this.byId.get(id);
       if (!tracked) {
         const space = new XRSpace(this.device[P_DEVICE].globalSpace, transform);
-        const plane = new XRPlane(undefined as never, space, toPoints(outline));
+        // No IWER NativePlane: the constructor's orientation guess finds no transform; ARKit's is set below.
+        const plane = new XRPlane({} as never, space, toPoints(outline));
         plane[P_PLANE].orientation = orientation;
         plane[P_PLANE].lastChangedTime = now;
         this.byId.set(id, { plane, transform, outline, lastChanged: data.lastChanged });

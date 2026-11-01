@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { mat4 } from 'gl-matrix';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { fakeWebGPU, startFrames, startGPUFrames } from './support/xr-frames.js';
 import type { HoloWebGlobal } from '../src/index.js';
 import { computeStereo, applyDepthRange } from '../src/stereo.js';
 import { lookupPhone } from '../src/phones.js';
@@ -71,8 +72,16 @@ const invert = (m: mat4): mat4 => mat4.invert(mat4.create(), m) ?? mat4.create()
 const camView = invert(camPose);
 const arkitProj = mat4.perspective(mat4.create(), 1.0, 0.5, 0.01, 1000);
 
+/** The depth terms of a WebGPU session's projection ([0, 1] clip depth). */
+function zeroToOneDepth(m: Float32Array, near: number, far: number): Float32Array {
+  m[10] = far / (near - far);
+  m[14] = (far * near) / (near - far);
+  return m;
+}
+
 beforeAll(async () => {
   (globalThis as Record<string, unknown>).WebGL2RenderingContext = class {};
+  fakeWebGPU();
   (globalThis as Record<string, unknown>).webkit = {
     messageHandlers: {
       holoweb: {
@@ -137,8 +146,8 @@ describe('immersive-ar session', () => {
       requiredFeatures: ['hit-test'],
       optionalFeatures: ['local-floor', 'dom-overlay', 'anchors', 'light-estimation', 'webgpu', 'camera-access'],
     });
-    // A layers-only render state (as XRGPUBinding uses) drives the frame loop without WebGL.
-    session.updateRenderState({ layers: [{}], depthNear: 0.1, depthFar: 50 });
+    // A WebGPU session: renderState.layers drives the frame loop (as with XRGPUBinding).
+    startGPUFrames(session, { depthNear: 0.1, depthFar: 50 });
   });
 
   it('asks native to start and echoes granted features including webgpu', () => {
@@ -166,7 +175,8 @@ describe('immersive-ar session', () => {
     const view = pose!.views[0];
     expect(view.eye).toBe('none');
     for (let i = 0; i < 16; i++) expect(view.transform.matrix[i]).toBeCloseTo(camPose[i], 5);
-    const expected = applyDepthRange(new Float32Array(arkitProj), 0.1, 50);
+    // a WebGPU session: IWER rebuilds the depth terms for a [0, 1] clip depth range
+    const expected = zeroToOneDepth(new Float32Array(arkitProj), 0.1, 50);
     for (let i = 0; i < 16; i++) expect(view.projectionMatrix[i]).toBeCloseTo(expected[i], 5);
   });
 
@@ -180,7 +190,8 @@ describe('immersive-ar session', () => {
     for (let i = 0; i < 16; i++) expect(pose!.transform.matrix[i]).toBeCloseTo(centre[i], 5);
     const left = mat4.translate(mat4.create(), centre, [-0.032, 0, 0]);
     for (let i = 12; i < 15; i++) expect(pose!.views[0].transform.matrix[i]).toBeCloseTo(left[i], 5);
-    for (let i = 0; i < 16; i++) expect(pose!.views[1].projectionMatrix[i]).toBeCloseTo(s.right.projection[i], 5);
+    const right = zeroToOneDepth(new Float32Array(s.right.projection), 0.1, 50);
+    for (let i = 0; i < 16; i++) expect(pose!.views[1].projectionMatrix[i]).toBeCloseTo(right[i], 5);
     const vp = hw.bridge.device.nativeViewports;
     expect(vp.left?.width).toBeGreaterThan(0);
     expect(vp.left?.y).toBe(vp.right?.y);
@@ -284,7 +295,7 @@ describe('M7: anchors, light estimation, local-floor reset, stereo prediction', 
     session = await xr().requestSession('immersive-ar', {
       optionalFeatures: ['anchors', 'light-estimation', 'local-floor', 'hit-test', 'webgpu'],
     });
-    session.updateRenderState({ layers: [{}], depthNear: 0.1, depthFar: 50 });
+    startGPUFrames(session, { depthNear: 0.1, depthFar: 50 });
     hw.onFrame(10, 'mono', Array.from(camPose), Array.from(camView), Array.from(arkitProj), null, 'normal');
     await inFrame(session);
   });
@@ -388,7 +399,7 @@ describe('view-count policy (views.ts): never fewer views than the page has seen
 
   it('keeps one view for a mono-only session, adds an inert right view after stereo', async () => {
     const sess = await xr().requestSession('immersive-ar');
-    sess.updateRenderState({ layers: [{}] });
+    startFrames(sess);
     const local = await sess.requestReferenceSpace('local');
     hw.onFrame(1, 'mono', Array.from(camPose), Array.from(camView), Array.from(arkitProj), null, 'normal');
     await inFrame(sess);
@@ -400,6 +411,9 @@ describe('view-count policy (views.ts): never fewer views than the page has seen
     hw.onFrame(3, 'mono', Array.from(camPose), Array.from(camView), Array.from(arkitProj), null, 'normal');
     const [mono, inert] = await eyes(sess, local);
     expect([mono.eye, inert.eye]).toEqual(['none', 'right']);
+    // a WebGL session keeps the [-1, 1] depth terms (default depthNear 0.1, depthFar 1000)
+    const glProjection = applyDepthRange(new Float32Array(arkitProj), 0.1, 1000);
+    for (let i = 0; i < 16; i++) expect(mono.projectionMatrix[i]).toBeCloseTo(glProjection[i], 5);
     expect(Array.from(inert.transform.matrix)).toEqual(Array.from(mono.transform.matrix));
     const p = inert.projectionMatrix;
     for (const i of [0, 5, 8, 10, 11, 14]) expect(p[i]).toBe(mono.projectionMatrix[i]);
@@ -414,7 +428,7 @@ describe('view-count policy (views.ts): never fewer views than the page has seen
 
   it('starts each session afresh', async () => {
     const sess = await xr().requestSession('immersive-ar');
-    sess.updateRenderState({ layers: [{}] });
+    startFrames(sess);
     const local = await sess.requestReferenceSpace('local');
     hw.onFrame(4, 'mono', Array.from(camPose), Array.from(camView), Array.from(arkitProj), null, 'normal');
     await inFrame(sess);

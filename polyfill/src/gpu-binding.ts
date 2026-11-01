@@ -1,234 +1,100 @@
 /**
- * XRGPUBinding polyfill (WebXR/WebGPU binding) over the page's own GPUDevice.
+ * HoloWeb side of IWER's XRGPUBinding (IWER 2.7.0 from PR #208: WebXR/WebGPU binding, WebGPU layers
+ * and a compositor that draws them onto an IWER-owned canvas in the device's canvas container).
+ * installRuntime sets XRGPUBinding, XRProjectionLayer and XRGPUSubImage; this module adapts them:
  *
- * Surface matches what three.js XRManager (WebGPU backend) calls:
- *   new XRGPUBinding(session, device), getPreferredColorFormat(),
- *   createProjectionLayer({ colorFormat, textureType? }) -> { textureWidth, textureHeight,
- *   textureArrayLength, ignoreDepthValues }, session.updateRenderState({ layers: [layer] }),
- *   getViewSubImage(layer, view) -> { colorTexture, viewport, getViewDescriptor() }.
- * The session must have been created with the 'webgpu' feature.
+ * - Native resolution. The compositor canvas is the native framebuffer (patched presentationSize hook),
+ *   and a projection layer's views are sized to one view: the full framebuffer in mono, one HoloKit eye
+ *   rect in stereo (getRecommendedViewResolution, read when the layer is created). The patched
+ *   compositor draws each eye at its nativeViewports rect and shows the 'none' view in mono.
  *
- * Layer textures are 2-layer 'texture-array's sized to one view: the full framebuffer in
- * mono, one HoloKit eye rect in stereo. Each view renders into its own array layer with a
- * full-layer viewport, which is what three.js' layered render path assumes.
+ * - Mid-session mono <-> stereo (1 <-> 2 views): three.js r186's WebGPU backend caches the render
+ *   pass descriptor of its intermediate (tone-mapping / colour-space) target under a key without
+ *   the ArrayCamera size, and builds one colour attachment per camera on first use. A descriptor
+ *   first built with 1 camera crashes when a 2nd camera appears (_createArrayCameraLayerDescriptors
+ *   reads colorAttachments[1]); one built with 2 cameras serves 1 or 2. So a mono session primes it:
+ *   until the page has rendered two views for PRIME_FRAMES frames, views.ts appends its inert
+ *   'right' view. A session that stays mono is a true single view after that.
  *
- * Mid-session mono <-> stereo (1 <-> 2 views): three.js r186's WebGPU backend caches the render
- * pass descriptor of its intermediate (tone-mapping / colour-space) target under a key without
- * the ArrayCamera size, and builds one colour attachment per camera on first use. A descriptor
- * first built with 1 camera crashes when a 2nd camera appears (_createArrayCameraLayerDescriptors
- * reads colorAttachments[1]); one built with 2 cameras serves 1 or 2. So a mono session primes it:
- * until the page has rendered two views for PRIME_FRAMES frames, views.ts appends its inert
- * 'right' view. A session that stays mono is a true single view after that.
+ * - The inert view's sub-image has a 0x0 viewport, like XRWebGLLayer.getViewport for it. IWER's
+ *   compositor never shows it in mono (it draws only the 'none' view there).
+ *
+ * - IWER's first compositor canvas is tagged data-holoweb="xr-gpu-presenter" (diagnostics, e2e).
  */
-import { P_DEVICE, P_SESSION, XRSession, XRViewport } from 'iwer';
-import type { XRView } from 'iwer';
+import { P_DEVICE, XRGPUBinding, XRProjectionLayer, XRSession, XRViewport } from 'iwer';
+import type { XRDevice } from 'iwer';
+import { XRGPUPresenter } from 'iwer/lib/layers/XRGPUPresenter.js';
 import { addFrameEndListener, nativeFramebufferSize } from './device.js';
-import { GPUPresenter, type LayerBlit } from './gpu-presenter.js';
-import type { PixelRect } from './stereo.js';
-
-type Eye = 'left' | 'right' | 'none';
 
 /** Frames with two rendered views after which three.js' descriptor cache is primed. */
 export const PRIME_FRAMES = 3;
 
-export interface XRGPUProjectionLayerInit {
-  colorFormat: GPUTextureFormat;
-  depthStencilFormat?: GPUTextureFormat;
-  textureType?: 'texture' | 'texture-array';
-  scaleFactor?: number;
+interface LayerUse {
+  /** Eyes the page asked sub-images for in the current frame. */
+  readonly eyes: Set<string>;
+  /** Frames in which the page rendered two views into the layer. */
+  twoViewFrames: number;
 }
 
-export class XRGPUProjectionLayer extends EventTarget {
-  readonly textureArrayLength = 2;
-  readonly ignoreDepthValues = true;
-  readonly isStatic = false;
-  fixedFoveation: number | null = null;
-  deltaPose = null;
-  /** Views requested through getViewSubImage during the current frame. */
-  readonly usedEyes = new Set<Eye>();
-  /** Frames in which the page rendered two views into this layer. */
-  twoViewFrames = 0;
+const layerUse = new WeakMap<XRProjectionLayer, LayerUse>();
 
-  constructor(
-    readonly session: XRSession,
-    readonly colorTexture: GPUTexture,
-    readonly colorFormat: GPUTextureFormat,
-    /** Allocated when the page passes depthStencilFormat (2 layers, same size as the colour). */
-    readonly depthStencilTexture: GPUTexture | null = null,
-  ) {
-    super();
+function useOf(layer: XRProjectionLayer): LayerUse {
+  let use = layerUse.get(layer);
+  if (!use) {
+    use = { eyes: new Set(), twoViewFrames: 0 };
+    layerUse.set(layer, use);
   }
-
-  get textureWidth(): number {
-    return this.colorTexture.width;
-  }
-
-  get textureHeight(): number {
-    return this.colorTexture.height;
-  }
-
-  destroy(): void {
-    this.colorTexture.destroy();
-    this.depthStencilTexture?.destroy();
-  }
+  return use;
 }
 
-export class XRGPUSubImage {
-  readonly motionVectorTexture: GPUTexture | null = null;
-
-  constructor(
-    readonly colorTexture: GPUTexture,
-    readonly viewport: XRViewport,
-    readonly imageIndex: number,
-    readonly colorTextureFormat: GPUTextureFormat,
-    readonly depthStencilTexture: GPUTexture | null = null,
-  ) {}
-
-  getViewDescriptor(): GPUTextureViewDescriptor {
-    return { dimension: '2d', baseArrayLayer: this.imageIndex, arrayLayerCount: 1, mipLevelCount: 1 };
-  }
-}
-
-/** Destination rect (canvas pixels, bottom-left origin) for a view in the current mode. */
-export function destinationRect(session: XRSession, eye: Eye, fb: { width: number; height: number }): PixelRect {
-  const device = session[P_SESSION].device;
-  const native = device[P_DEVICE].nativeViewports[eye];
-  if (native) return native;
-  if (eye === 'none' || !device.stereoEnabled) return { x: 0, y: 0, width: fb.width, height: fb.height };
-  const half = Math.floor(fb.width / 2);
-  return { x: eye === 'left' ? 0 : half, y: 0, width: half, height: fb.height };
-}
-
-/** Per-view texture size for a new layer, from the render mode at creation time. */
-function layerSize(session: XRSession, scale: number): { width: number; height: number } {
+/** Per-view texture size for a new projection layer, from the render mode at creation time. */
+export function recommendedViewResolution(device: XRDevice): { width: number; height: number } {
   const fb = nativeFramebufferSize();
-  const eyeRect = session[P_SESSION].device.stereoEnabled ? destinationRect(session, 'left', fb) : null;
-  const w = eyeRect ? eyeRect.width : fb.width;
-  const h = eyeRect ? eyeRect.height : fb.height;
-  return { width: Math.max(1, Math.round(w * scale)), height: Math.max(1, Math.round(h * scale)) };
+  if (!device.stereoEnabled) return fb;
+  const left = device[P_DEVICE].nativeViewports.left;
+  return left ? { width: left.width, height: left.height } : { width: Math.floor(fb.width / 2), height: fb.height };
 }
 
-interface Presentation {
-  presenter: GPUPresenter;
-  layers: Set<XRGPUProjectionLayer>;
-}
+/** Size IWER's WebGPU layers and compositor natively, and track views for three.js priming. */
+export function installGPUBinding(device: XRDevice): void {
+  const state = device[P_DEVICE];
+  state.presentationSize = nativeFramebufferSize;
+  state.getRecommendedViewResolution = () => recommendedViewResolution(device);
 
-const presentations = new WeakMap<XRSession, Presentation>();
-
-function presentFrame(session: XRSession): void {
-  const presentation = presentations.get(session);
-  if (!presentation) return;
-  const fb = nativeFramebufferSize();
-  const blits: LayerBlit[] = [];
-  const stereo = session[P_SESSION].device.stereoEnabled;
-  for (const layer of session.renderState.layers ?? []) {
-    if (!(layer instanceof XRGPUProjectionLayer) || layer.usedEyes.size === 0) continue;
-    if (layer.usedEyes.size >= 2) layer.twoViewFrames++;
-    for (const eye of layer.usedEyes) {
-      // Skip views of the other mode (the priming view in mono, a stale 'none' in stereo).
-      if (stereo === (eye === 'none')) continue;
-      blits.push({ texture: layer.colorTexture, layerIndex: eye === 'right' ? 1 : 0, rect: destinationRect(session, eye, fb) });
+  const getViewSubImage = XRGPUBinding.prototype.getViewSubImage;
+  XRGPUBinding.prototype.getViewSubImage = function (this: XRGPUBinding, layer, view) {
+    const subImage = getViewSubImage.call(this, layer, view);
+    useOf(layer).eyes.add(view.eye);
+    if (view.eye === 'right' && !device.stereoEnabled) {
+      Object.defineProperty(subImage, 'viewport', { configurable: true, value: new XRViewport(0, 0, 0, 0) });
     }
-    layer.usedEyes.clear();
-  }
-  if (blits.length > 0) presentation.presenter.present(blits, fb.width, fb.height);
-}
+    return subImage;
+  };
 
-export class XRGPUBinding {
-  private readonly session: XRSession;
+  type Surfaces = { surface(index: number): { canvas: HTMLCanvasElement } };
+  const presenter = XRGPUPresenter.prototype as unknown as Surfaces;
+  const surface = presenter.surface;
+  presenter.surface = function (this: Surfaces, index) {
+    const created = surface.call(this, index);
+    if (index === 0) created.canvas.dataset.holoweb = 'xr-gpu-presenter';
+    return created;
+  };
 
-  constructor(session: XRSession, readonly device: GPUDevice) {
-    if (!(session instanceof XRSession)) throw new TypeError('XRGPUBinding: not a HoloWeb XRSession');
-    if (session[P_SESSION].ended) throw new DOMException('XRSession has ended', 'InvalidStateError');
-    if (!session.enabledFeatures.includes('webgpu')) {
-      throw new DOMException("XRGPUBinding requires the 'webgpu' session feature", 'InvalidStateError');
+  addFrameEndListener(device, (frame) => {
+    for (const layer of frame.session.renderState.layers ?? []) {
+      const use = layer instanceof XRProjectionLayer ? layerUse.get(layer) : undefined;
+      if (!use) continue;
+      if (use.eyes.size >= 2) use.twoViewFrames++;
+      use.eyes.clear();
     }
-    this.session = session;
-  }
-
-  get nativeProjectionScaleFactor(): number {
-    return 1;
-  }
-
-  getPreferredColorFormat(): GPUTextureFormat {
-    return navigator.gpu.getPreferredCanvasFormat();
-  }
-
-  createProjectionLayer(init: XRGPUProjectionLayerInit): XRGPUProjectionLayer {
-    if (init.textureType === 'texture') {
-      throw new DOMException("HoloWeb XRGPUBinding supports textureType 'texture-array' only", 'NotSupportedError');
-    }
-    const session = this.session;
-    const size = layerSize(session, init.scaleFactor ?? 1);
-    const texture = this.device.createTexture({
-      label: 'holoweb-xr-projection-layer',
-      size: { width: size.width, height: size.height, depthOrArrayLayers: 2 },
-      format: init.colorFormat,
-      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC,
-    });
-    // Spec behaviour: a depth/stencil texture array when asked for. three.js allocates its own depth
-    // (no depthStencilFormat); renderers that size depth from the viewport need ours to match.
-    const depth = init.depthStencilFormat
-      ? this.device.createTexture({
-          label: 'holoweb-xr-projection-layer-depth',
-          size: { width: size.width, height: size.height, depthOrArrayLayers: 2 },
-          format: init.depthStencilFormat,
-          usage: GPUTextureUsage.RENDER_ATTACHMENT,
-        })
-      : null;
-    const layer = new XRGPUProjectionLayer(session, texture, init.colorFormat, depth);
-    this.presentation(init.colorFormat).layers.add(layer);
-    return layer;
-  }
-
-  getViewSubImage(layer: XRGPUProjectionLayer, view: XRView): XRGPUSubImage {
-    if (!(layer instanceof XRGPUProjectionLayer) || layer.session !== this.session) {
-      throw new DOMException('Layer was not created by this XRGPUBinding', 'InvalidStateError');
-    }
-    const eye = view.eye as Eye;
-    layer.usedEyes.add(eye);
-    // views.ts' inert 2nd view in mono gets a 0x0 viewport, like XRWebGLLayer.getViewport.
-    const inert = eye === 'right' && !this.session[P_SESSION].device.stereoEnabled;
-    const viewport = inert ? new XRViewport(0, 0, 0, 0) : new XRViewport(0, 0, layer.textureWidth, layer.textureHeight);
-    return new XRGPUSubImage(layer.colorTexture, viewport, eye === 'right' ? 1 : 0, layer.colorFormat, layer.depthStencilTexture);
-  }
-
-  private presentation(format: GPUTextureFormat): Presentation {
-    const session = this.session;
-    let presentation = presentations.get(session);
-    if (presentation) return presentation;
-    const created: Presentation = { presenter: new GPUPresenter(this.device, format), layers: new Set() };
-    presentations.set(session, created);
-    const removeListener = addFrameEndListener(session[P_SESSION].device, (frame) => {
-      if (frame.session === session) presentFrame(session);
-    });
-    session.addEventListener(
-      'end',
-      () => {
-        removeListener();
-        created.presenter.destroy();
-        created.layers.forEach((l) => l.destroy());
-        presentations.delete(session);
-      },
-      { once: true },
-    );
-    presentation = created;
-    return presentation;
-  }
+  });
 }
 
 /** True while three.js' WebGPU descriptor cache may still hold a 1-view descriptor (views.ts). */
 export function needsPrimingView(session: XRSession): boolean {
   // three.js-specific (it sets globalThis.__THREE__); other WebGPU renderers get a plain single view.
   if (typeof (globalThis as { __THREE__?: unknown }).__THREE__ === 'undefined') return false;
-  return (session.renderState.layers ?? []).some((l) => l instanceof XRGPUProjectionLayer && l.twoViewFrames < PRIME_FRAMES);
-}
-
-/** Install globalThis.XRGPUBinding (and the layer classes) if WebGPU is present. */
-export function installGPUBinding(target: Record<string, unknown> = globalThis as unknown as Record<string, unknown>): boolean {
-  if (typeof navigator === 'undefined' || !('gpu' in navigator)) return false;
-  target.XRGPUBinding = XRGPUBinding;
-  target.XRGPUSubImage = XRGPUSubImage;
-  target.XRProjectionLayer = XRGPUProjectionLayer;
-  return true;
+  return (session.renderState.layers ?? []).some(
+    (l) => l instanceof XRProjectionLayer && (layerUse.get(l)?.twoViewFrames ?? 0) < PRIME_FRAMES,
+  );
 }

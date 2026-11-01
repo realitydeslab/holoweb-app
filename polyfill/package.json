@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "gl-matrix": "3.4.4",
-    "iwer": "2.4.0"
+    "iwer": "file:vendor/iwer-2.7.0-pr208.tgz"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
@@ -30,5 +30,5 @@
     "typescript": "7.0.2",
     "vitest": "5.0.1"
   },
-  "description": "HoloWeb WebXR runtime for WKWebView: IWER 2.4.0 core + HoloKit device + ARKit bridge"
+  "description": "HoloWeb WebXR runtime for WKWebView: IWER 2.7.0 (PR #208) core + HoloKit device + ARKit bridge"
 }

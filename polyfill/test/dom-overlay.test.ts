@@ -2,6 +2,7 @@
 // G6: dom-overlay with root = document.body (immersive-web plane / mesh detection samples).
 import { mat4 } from 'gl-matrix';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { startFrames } from './support/xr-frames.js';
 import type { HoloWebGlobal } from '../src/index.js';
 
 type Msg = Record<string, unknown> & { type: string };
@@ -36,7 +37,7 @@ describe('dom-overlay with root = document.body', () => {
 
     const session = await xr().requestSession('immersive-ar', { optionalFeatures: ['dom-overlay'], domOverlay: { root: document.body } });
     try {
-      session.updateRenderState({ layers: [{}] });
+      startFrames(session);
       await nextFrame(session);
       expect((session as unknown as { domOverlayState: { type: string } }).domOverlayState.type).toBe('screen');
       expect(document.documentElement.classList.contains('holoweb-xr-behind')).toBe(true);

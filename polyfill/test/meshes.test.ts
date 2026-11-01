@@ -2,6 +2,7 @@
 // G9 mesh-detection over bridge.onMeshes, G13 capabilities from the ready reply.
 import { mat4 } from 'gl-matrix';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { startFrames } from './support/xr-frames.js';
 import { parseCapabilities } from '../src/bridge-types.js';
 import { featuresFor } from '../src/device.js';
 import type { HoloWebGlobal } from '../src/index.js';
@@ -68,7 +69,7 @@ describe("'mesh-detection': frame.detectedMeshes", () => {
   it('exposes stable XRMesh objects with typed geometry, updating in place', async () => {
     const session = await xr().requestSession('immersive-ar', { requiredFeatures: ['mesh-detection'] });
     try {
-      session.updateRenderState({ layers: [{}] });
+      startFrames(session);
       const local = await session.requestReferenceSpace('local');
       hw.onMeshes(mockMeshes(false, 0) as never);
       const first = await inFrame(session, (f) => [...f.detectedMeshes]);
@@ -113,7 +114,7 @@ describe("'mesh-detection': frame.detectedMeshes", () => {
   it('is empty for sessions without the feature', async () => {
     const session = await xr().requestSession('immersive-ar');
     try {
-      session.updateRenderState({ layers: [{}] });
+      startFrames(session);
       hw.onMeshes(mockMeshes(false, 0) as never);
       expect(await inFrame(session, (f) => f.detectedMeshes.size)).toBe(0);
     } finally {

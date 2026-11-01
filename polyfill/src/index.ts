@@ -42,7 +42,7 @@ export interface HoloWebGlobal extends NativeCallbacks {
   readonly meshes: MeshTracking;
   readonly reflections: ReflectionMaps;
   readonly images: ImageTracking;
-  /** WebXR interface globals not installed (should be empty; XRGPUBinding needs WebGPU). */
+  /** WebXR interface globals not installed (should be empty). */
   missingGlobals(): string[];
 }
 
@@ -97,7 +97,7 @@ export function install(): HoloWebGlobal {
   installLightEstimation(() => bridge.latest?.light);
   installReflectionBinding(reflections);
   installTransientHitTest(environment);
-  installGPUBinding();
+  installGPUBinding(device);
   installWebXRGlobals();
   installViewCountPolicy(needsPrimingView);
   installOpaqueFramebuffer();

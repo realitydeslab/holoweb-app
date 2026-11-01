@@ -3,6 +3,7 @@
 // not visible, XR callbacks pause while hidden, the session survives.
 import { mat4 } from 'gl-matrix';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { startFrames } from './support/xr-frames.js';
 import type { HoloWebGlobal } from '../src/index.js';
 
 type Msg = Record<string, unknown> & { type: string };
@@ -32,7 +33,7 @@ describe('native visibility', () => {
   it('maps onVisibility to visibilityState + visibilitychange, ends input, pauses frames while hidden', async () => {
     const session = await xr().requestSession('immersive-ar');
     try {
-      session.updateRenderState({ layers: [{}] });
+      startFrames(session);
       await nextFrame(session);
       const seen: string[] = [];
       session.addEventListener('visibilitychange', () => seen.push(session.visibilityState));

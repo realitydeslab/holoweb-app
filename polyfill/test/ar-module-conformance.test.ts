@@ -3,6 +3,7 @@
 // normative items checked against the polyfill. See README "WebXR AR Module conformance".
 import { mat4 } from 'gl-matrix';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { startFrames } from './support/xr-frames.js';
 import type { HoloWebGlobal } from '../src/index.js';
 
 type Msg = Record<string, unknown> & { type: string };
@@ -34,7 +35,7 @@ const push = (mode: 'mono' | 'stereo') =>
 
 async function start(init: object = {}): Promise<{ session: Session; local: unknown }> {
   const session = await xr().requestSession('immersive-ar', init);
-  session.updateRenderState({ layers: [{}] });
+  startFrames(session);
   push('mono');
   const local = await session.requestReferenceSpace('local');
   await inFrame(session);
@@ -68,7 +69,7 @@ describe('WebXR AR Module conformance', () => {
   it("XREnvironmentBlendMode: an immersive-vr session is 'opaque' in mono and stereo, and native is told the mode", async () => {
     const session = await xr().requestSession('immersive-vr');
     try {
-      session.updateRenderState({ layers: [{}] });
+      startFrames(session);
       push('mono');
       await inFrame(session);
       const modes = [session.environmentBlendMode, session.interactionMode];

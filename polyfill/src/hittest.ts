@@ -151,7 +151,9 @@ export class PlaneEnvironment implements SyntheticEnvironmentModule {
 
   render(_time: number): void {}
   loadEnvironment(_json: unknown): void {}
-  loadDefaultEnvironment(_envId: string): void {}
+  loadDefaultEnvironment(_envId: string): Promise<void> {
+    return Promise.resolve();
+  }
 
   deleteAll(): void {
     this.planes = [];

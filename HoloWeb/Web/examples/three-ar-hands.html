@@ -35,7 +35,9 @@
       addEventListener('error', (e) => status.errors.push(String(e.message)));
       addEventListener('unhandledrejection', (e) => status.errors.push(String(e.reason)));
 
-      const renderer = new THREE.WebGPURenderer({ antialias: true, alpha: true, forceWebGL: params.get('backend') === 'webgl' });
+      // 'webgpu' only for the WebGPU backend: a session with it refuses XRWebGLLayer (WebXR/WebGPU binding)
+      const forceWebGL = params.get('backend') === 'webgl';
+      const renderer = new THREE.WebGPURenderer({ antialias: true, alpha: true, forceWebGL });
       renderer.setPixelRatio(devicePixelRatio);
       renderer.setSize(innerWidth, innerHeight);
       renderer.xr.enabled = true;
@@ -65,7 +67,7 @@
       }
       hands.forEach((hand) => hand.addEventListener('connected', (e) => (hand.userData.inputSource = e.data)));
 
-      document.body.appendChild(ARButton.createButton(renderer, { optionalFeatures: ['hand-tracking', 'webgpu'] }));
+      document.body.appendChild(ARButton.createButton(renderer, { optionalFeatures: ['hand-tracking', ...(forceWebGL ? [] : ['webgpu'])] }));
       renderer.xr.addEventListener('sessionstart', () => {
         const session = renderer.xr.getSession();
         status.backend = renderer.backend.isWebGPUBackend ? 'webgpu' : 'webgl';
