@@ -800,3 +800,17 @@ Device (show.sh hands2, hands-check.html):
   dips move between pages run to run (thermal/noise).
 - Environment: mid-session, Homebrew's simdjson moved to libsimdjson.36 and Homebrew node 26.9.0 (linked to .33)
   stopped starting (dyld). Not caused here. Verified with nvm node v20.14.0 instead.
+- Evening recheck (Holo iPhone 15 I, Debug build of a409836 = TestFlight 2611011702 code; Xcode 27.2 needed
+  `xcodebuild -downloadComponent MetalToolchain` again). `--only toggle,immersive-web`: 57/62; rerun of
+  toggle + the two failures x2: 30/32. iw-webgpu-ar-session "no element button.webvr-ui-button" did not
+  repeat (2/2 pass). iw-mesh-detection "THREE.Object3D.add: object not an instance" (2 of 3 runs) is the
+  page's own buildController() returning undefined for 'screen' (touch) sources, same as ballshooter above;
+  the failing log also shows visibility hidden/visible (phone touched mid-run). three-webgpu fps min 52.5 once.
+  During the rerun ARKit delivered 30 fps (format 60) on every page, the first run 60; xrFps stayed ~60.
+  Likely heat after ~25 min of AR or low light; recheck when cool.
+- Recheck 22:51 after ~2 h idle (phone on the charging cable): 31/32 (three-webgpu fps min 52 once; mesh-detection
+  2/2 and iw-webgpu-ar-session 2/2 clean). ARKit was 60 fps for the first ~10 s of the first run, then 30 fps
+  for the rest and on every relaunch; a screenshot shows a normally lit room, so low light is unlikely.
+  Cause still unconfirmed: the app does not log thermalState (see the 2026-10 bench note above).
+- Recheck 23:24 (after Amber readied the phone): 32/32, ARKit 60 fps on all 6 launches (~4 min of AR),
+  three-webgl fps min 58, three-webgpu min 59.5. So the 30 fps runs were a device condition, not the build.
