@@ -15,6 +15,7 @@ Deliver an executable plan for HoloWeb: (1) iOS app + App Clip that loads a webp
 - [x] Push holoweb-app + holoweb-website (2026-09-24; merged 6 remote 2024 README commits, c0e7f52)
 - [x] TestFlight 1.0 (2610281251) uploaded via Scripts/testflight.sh (2026-10-28), from the uncommitted iOS 27 rotation-angle tree; same build (Debug) installed on Holo iPhone 15 A and Crack B; "Internal" group gets it automatically
 - [x] TestFlight 1.0 (2610292249) uploaded (2026-10-29): 2610281251 + Swift concurrency warning cleanup (0 Swift warnings in a clean build)
+- [x] TestFlight 1.0 (2611011702) uploaded (2026-11-01, VALID) from feat/ios27-iwer-2.7 at 95b87eb: iOS 27 APIs + concurrency cleanup + IWER 2.7.0 (PR #208)
 - [x] iOS 27: replace deprecated `viewMatrix(for:)` / `projectionMatrix(for:…)` / `displayTransform(for:…)` with the rotation-angle APIs, and `UIScreen.main` with the window scene's screen (2026-10-29: clean build of app + tests has 0 deprecation warnings; on-device portrait/landscape AR check still pending)
 - [ ] Cardboard viewer mode v1: viewer profiles (handheld / HoloKit / Cardboard), mode picker, Cardboard stereo math, opaque, tests, device check
 - [ ] Cardboard v2: lens distortion mesh, camera passthrough for immersive-ar
