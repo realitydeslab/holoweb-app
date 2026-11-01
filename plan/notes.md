@@ -727,3 +727,76 @@ Device (show.sh hands2, hands-check.html):
 - Verified: vitest (same physical pixel as landscape layout; eyes inside portrait fb), device demo.html portrait
   -> stereo shows two eyes stacked along the long side.
 - Gotcha: after `npm run build`, run `Scripts/sync-polyfill.sh` or the app ships the old HoloWeb/Web copy.
+
+## 2026-09-25 Spark splat benchmark (spark-splat.html?bench)
+- The page now lives on the website (https://holoweb.app/examples/spark-splat.html, holoweb-website
+  `public/examples/`), not in the app bundle; the numbers below were measured with the bundled copy.
+- Setup: iPhone 15 Pro "Holo iPhone 15 I", iOS 27 debug build, Spark 2.2.0 + three r180 (WebGL2), canvas 2556x1179
+  (dpr 3), phone still on the desk. Per object: 3 s warm-up, 8 s mono, 8 s HoloKit stereo, in one AR session
+  (about 2.5 min total). fps = frames / time from XR rAF timestamps; slow = frames > 20 ms.
+- The 7 objects are Spark's example assets from sparkjs.dev (not bundled: 19 MB would break the 15 MB App Clip).
+
+| Object | Splats | Load ms | Mono fps (p95 ms, slow %) | Stereo fps (p95 ms, slow %) |
+|---|---|---|---|---|
+| butterfly | 177,132 | 252 | 59.9 (17, 0.4) | 60.0 (18, 0) |
+| penguin | 128,136 | 1079 | 60.0 (17, 0.2) | 59.9 (17, 0.2) |
+| cat | 206,232 | 127 | 51.9 (34, 11.3) | 48.9 (34, 23.2) |
+| robot head | 45,401 | 58 | 60.0 (18, 0) | 59.7 (18, 0.4) |
+| dessert | 204,487 | 126 | 56.7 (33, 5.7) | 42.7 (34, 41.5) |
+| burger | 79,674 | 91 | 60.0 (18, 0) | 59.7 (18, 0.6) |
+| pad thai | 95,255 | 64 | 60.0 (17, 0) | 30.8 (36, 95.1) |
+
+- Pad thai stereo 30.8 fps was the end of the long session, not the model: alone in a fresh session it runs
+  mono 60.0 / stereo 60.0 (p95 17/18 ms). Late-session drops look thermal; the app does not log
+  thermalState yet (worth adding to the bench).
+- Budget on this phone: ~180K splats hold 60 fps in mono and stereo; ~205K splats miss frames (p95 ≈ 34 ms,
+  i.e. every missed frame is a full 2-frame vsync), worse in stereo.
+- After the first stereo switch, "mono" keeps the polyfill's inert 0x0 second view (views.ts), so mono rows
+  2–7 are mono + inert view; Spark still processes that view.
+- First run was invalid: the page cycled through all objects in a few seconds (select -> next object), so one
+  row measured the wrong splat. Bench mode now ignores select and logs every select's source; no select
+  fired in the rerun.
+- Next savings to try: render at dpr 2 (canvas 1704x786), Spark `lodSplatCount` / `lodSplatScale` on mobile.
+
+## 2026-11-01 IWER 2.4.0 -> 2.7.0 from PR #208 (upstream XRGPUBinding)
+- Source: meta-quest/immersive-web-emulation-runtime PR #208 (salmanmkc, "emulate XRGPUBinding so WebGPU apps
+  can enter XR"), head ce99bce (contains upstream main). Built with pnpm, packed to
+  `polyfill/vendor/iwer-2.7.0-pr208.tgz` (994,636 bytes); `polyfill/scripts/build-iwer.sh` rebuilds it
+  (same size twice). `package.json`: `"iwer": "file:vendor/iwer-2.7.0-pr208.tgz"`.
+- Decision (Amber, 2026-11-01): use IWER's XRGPUBinding + compositor, delete ours (`src/gpu-presenter.ts`;
+  `src/gpu-binding.ts` is now an adapter). Alternative was keeping ours and disabling IWER's.
+- Patch: `patches/iwer+2.7.0.patch`, 6 files, 18 HOLOWEB tags. Kept from 2.4.0: per-eye projection/viewport,
+  mono 'none' view, XRRay (both upstream bugs still present), remote removal, full-framebuffer clear,
+  onFrameEnd (session.ts `rendered` needs it), 'light-estimation' type. Dropped: layers render state,
+  baseLayer/layers exclusion, 'webgpu' type (upstream has them). New: [0, 1] depth for native projections in
+  'webgpu' sessions; compositor `presentationSize()` hook + eye regions from nativeViewports + mono 'none' view;
+  head-gaze filter (IWER 2.7 hid every targetRayMode 'gaze' source without 'gaze-tracking', which broke HoloKit
+  tap-to-select in stereo: all stereo e2e cases timed out waiting for `placed`).
+  `npx patch-package iwer` fails (it installs iwer@2.7.0 from the registry); `scripts/iwer-patch.sh` diffs
+  node_modules/iwer against the tarball instead.
+- Other upstream changes hit: `SyntheticEnvironmentModule.loadDefaultEnvironment` returns a Promise
+  (hittest.ts); `XRPlane` constructor reads `nativePlane.transform` (planes.ts passes `{}`); layers are ignored
+  in non-'webgpu' sessions and 'webgpu' needs a real `requestAdapter()` adapter, so the unit tests' old
+  `updateRenderState({ layers: [{}] })` frame driver no longer ran frames -> `test/support/xr-frames.ts`
+  (`startFrames`: WebGL base layer over a stub GL; `fakeWebGPU` + `startGPUFrames` for 'webgpu' sessions).
+- Examples three-ar-hands.html / image-tracking.html requested 'webgpu' even with `?backend=webgl`; a
+  'webgpu' session now refuses XRWebGLLayer (spec), so they request it only for the WebGPU backend.
+- Bundle 184.7 KB -> 251.5 KB (IWER's WebGPU layers/compositor ~49 KB minified); budget 250 -> 260 KB.
+  Stubbing GPUSpaceWarp (~5 KB, 'space-warp' never granted) would get under 250 but is fragile.
+- Results: vitest 120/120, typecheck clean, e2e 41/41 (Chromium + Metal WebGPU). Compositor canvas is native
+  (1688x780, 780x1688 after rotation). Old vs new bundle, three-ar-webgpu stereo: reticle y in the right eye
+  465.5 vs 466.4 px (unchanged).
+- Pre-existing, not from this change: in stereo, three-ar.html (WebGL) draws the reticle ~130 px higher in the
+  eye rect than three-ar-webgpu.html (336 vs 466 px), with both the old and the new bundle; p9 = 0 in the mock.
+  Worth a separate look.
+- Review fixes (code-reviewer): compositor clamps eye rects to the canvas before setViewport (WebGPU rejects
+  out-of-bounds viewports and drops the whole pass; the old presenter clamped too); iwer-patch.sh fails on
+  git diff errors / empty diffs; build-iwer.sh deletes its temp clone; banner says IWER 2.7.0.
+- Device (Holo iPhone 15 I, iOS 27, `regression.py --skip-polyfill --only pages,toggle,immersive-web`): 92/99.
+  All WebGPU checks pass (three-webgpu: 4 toggles, min 60 fps, views follow mode; iw-webgpu-ar-session and
+  iw-webgpu-hands enter AR/VR with 'webgpu' granted, so IWER's adapter probe works in WKWebView). Fails: 6
+  plane checks (0 planes from ARKit, still phone) and three-webgl.fps min 53. With the clamp build, `--only
+  toggle` twice: 12/13 (three-webgpu.fps min 51.5) then 10/10 (webgl min 59, webgpu min 60): min-fps
+  dips move between pages run to run (thermal/noise).
+- Environment: mid-session, Homebrew's simdjson moved to libsimdjson.36 and Homebrew node 26.9.0 (linked to .33)
+  stopped starting (dyld). Not caused here. Verified with nvm node v20.14.0 instead.

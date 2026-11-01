@@ -210,6 +210,7 @@ On device (iPhone 15 Pro, iOS 27) unless noted.
   - enter VR: `immersive-hands` and `webgpu/immersive-hands`. Hand tracking in VR is granted since the capability fix (unit-tested), but not yet rechecked with real hands on device.
 - **three.js examples:** `webxr_ar_hittest`, `webxr_ar_lighting`, `webxr_ar_plane_detection` (live from threejs.org and bundled offline), and `webxr_ar_cones` (live).
 - **Image tracking:** the HoloWeb marker (0.15 m), PlayCanvas and Needle image-tracking samples.
+- **Gaussian splats ([Spark](https://sparkjs.dev) 2.2, WebGL2):** the 7 objects from Spark's examples ([holoweb.app/examples/spark-splat.html](https://holoweb.app/examples/spark-splat.html), gallery entry 16) render in mono and HoloKit stereo; up to ~180K splats hold 60 fps, ~205K splats drop to 43–57 fps (per-object numbers in `plan/notes.md`).
 - **Gallery:** Toji's WebXR particles, PlayCanvas AR (iframe), model-viewer AR, Babylon.js, three.js lighting, and the Immersive Web samples. Needle, SuperSplat and ball-shooter entries are listed but not fully checked on device yet.
 
 The complete per-feature status lives in [`plan/feature_registry.md`](plan/feature_registry.md).
@@ -224,7 +225,7 @@ HoloWeb/                 Swift app + App Clip (shared sources)
   ImageTracker.swift     reference images, imageSpace poses
   Renderer.swift         Metal camera background
   Web/                   bundled polyfill + example pages (served at holoweb-app://local/)
-polyfill/                TypeScript WebXR polyfill (fork of IWER 2.4.0 via patch-package)
+polyfill/                TypeScript WebXR polyfill (fork of IWER 2.7.0 from PR #208 via patch-package)
   src/                   bridge, device, stereo, session, features (planes, meshes, hands, images, …)
   test/                  vitest unit tests
   examples/              HoloWeb demo pages and bundled three.js examples
@@ -293,7 +294,7 @@ Debug builds accept launch environment variables for unattended runs:
 - Hand tracking uses the phone's camera: hands closer than about 30 cm, partly out of frame, or in dim light are detected less often, and fingertip depth is mostly inferred from the palm.
 - Plane detection needs textured surfaces and some phone movement; a still phone may take 10 s or more to report the first plane.
 - AR is thermally heavy. The camera and ARKit tracking use about 1.4 CPU cores even when idle. Rendering WebGL at 2× instead of 3× and lowering the camera format in stereo are the next planned savings.
-- The App Store Connect App Clip experience, TestFlight distribution and App Clip Code images are still to be set up.
+- TestFlight builds are uploaded with `Scripts/testflight.sh`; the App Store Connect App Clip experience and App Clip Code images are still to be set up.
 
 ## Use cases
 

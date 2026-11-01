@@ -12,10 +12,19 @@ Deliver an executable plan for HoloWeb: (1) iOS app + App Clip that loads a webp
 - [x] Execution: M0 cleanup, M1 WebGPU check, M2 polyfill, M3/M3b bridge + camera sync, M4 XRGPUBinding, M5 stereo (math + prediction), M6 App Clip, M7 anchors/light/floor — all verified on iPhone 15 Pro iOS 27 (see notes.md logs)
 - [x] AASA deploy (holoweb.app, cached by Apple CDN)
 - [x] App Store Connect record "HoloWeb: WebXR for iPhone" (6815450023) + TestFlight: 1.0 (2609240146) uploaded via Scripts/testflight.sh, VALID; internal group "Internal" with amber@reality.design (2026-09-24)
-- [ ] Push holoweb-app (website pushed 2026-09-24; app blocked on 6 remote README commits from 2024, merge pending)
-- [ ] iOS 27: replace deprecated `viewMatrix(for:)` / `projectionMatrix(for:…)` / `displayTransform(for:…)` with the rotation-angle APIs
+- [x] Push holoweb-app + holoweb-website (2026-09-24; merged 6 remote 2024 README commits, c0e7f52)
+- [x] TestFlight 1.0 (2610281251) uploaded via Scripts/testflight.sh (2026-10-28), from the uncommitted iOS 27 rotation-angle tree; same build (Debug) installed on Holo iPhone 15 A and Crack B; "Internal" group gets it automatically
+- [x] TestFlight 1.0 (2610292249) uploaded (2026-10-29): 2610281251 + Swift concurrency warning cleanup (0 Swift warnings in a clean build)
+- [x] iOS 27: replace deprecated `viewMatrix(for:)` / `projectionMatrix(for:…)` / `displayTransform(for:…)` with the rotation-angle APIs, and `UIScreen.main` with the window scene's screen (2026-10-29: clean build of app + tests has 0 deprecation warnings; on-device portrait/landscape AR check still pending)
 - [ ] Cardboard viewer mode v1: viewer profiles (handheld / HoloKit / Cardboard), mode picker, Cardboard stereo math, opaque, tests, device check
 - [ ] Cardboard v2: lens distortion mesh, camera passthrough for immersive-ar
+- [x] IWER 2.4.0 -> 2.7.0 built from PR #208 (meta-quest/immersive-web-emulation-runtime, head ce99bce, upstream XRGPUBinding):
+  - [x] build iwer-2.7.0.tgz from the PR head (pnpm build + pack)
+  - [x] vendor the tgz in polyfill/vendor/ + a script that rebuilds it from the pinned SHA; package.json -> file:
+  - [x] port patches/iwer+2.4.0.patch to 2.7.0: keep per-eye projection/viewport, mono 'none' view, XRRay, remote removal, full-framebuffer clear; drop layers render state, onFrameEnd, 'webgpu' type (upstream has them)
+  - [x] switch to IWER's XRGPUBinding + compositor; remove src/gpu-binding.ts, src/gpu-presenter.ts; keep HoloKit stereo viewports, mono camera passthrough, visibility handling of IWER's WebGPU canvas
+  - [x] gates: vitest 120/120, typecheck, build 251.6 KB (budget raised to 260 KB), e2e Chromium 41/41, Xcode build (WebKit e2e not run)
+  - [x] device: three-ar-webgpu + WebGL examples, mono + stereo, on iPhone 15 Pro (Holo iPhone 15 I, 2026-11-01)
 
 ## Key Questions
 1. Does WKWebView on iOS 27 expose navigator.gpu (WebGPU)? Any feature flag needed?

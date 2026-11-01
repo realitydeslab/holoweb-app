@@ -45,8 +45,8 @@ Test sources: **R** = `Scripts/regression.py` (on device) · **U** = `polyfill` 
 | ID | Feature | Status | Tests |
 |---|---|---|---|
 | C1 | WebGL2 (`XRWebGLLayer`) mono + stereo, 60 fps | device | R three-webgl.fps |
-| C2 | WebGPU via polyfilled `XRGPUBinding`, mono + stereo, 60 fps | device | R three-webgpu.fps, webgpu-check |
-| C3 | Mid-session mono ↔ stereo on WebGPU (three r186 descriptor-cache priming) | device | R three-webgpu.views-follow-mode, U gpu-priming |
+| C2 | WebGPU via IWER 2.7.0's `XRGPUBinding` (PR #208) + HoloWeb adapter (native-size layers/compositor, HoloKit eye rects), mono + stereo, 60 fps | device (IWER 2.7.0, 2026-11-01, Holo iPhone 15 I: three-webgpu min 60 fps, iw-webgpu-ar-session, iw-webgpu-hands) | R three-webgpu.fps, webgpu-check, U gpu-priming, E three-ar-webgpu (compositor canvas native size) |
+| C3 | Mid-session mono ↔ stereo on WebGPU (three r186 descriptor-cache priming) | device (IWER 2.7.0, 2026-11-01: 4 toggles, views follow mode) | R three-webgpu.views-follow-mode, U gpu-priming |
 | C4 | Old three.js (r110/r111): no stale right eye after stereo → mono | headless (+ user report fixed) | E stale-eye fixture + live Toji |
 | C5 | three r130–r173: renderState.layers undefined → XRWebGLLayer path | headless | E three-r152 fixture |
 | C6 | HoloKit X stereo math (per-eye projection, viewports, phone table) | headless | U stereo.test |
@@ -54,6 +54,7 @@ Test sources: **R** = `Scripts/regression.py` (on device) · **U** = `polyfill` 
 | C8 | Stereo pose prediction (25 ms, `__holoweb.setPrediction`) | headless | U prediction.test; tuning: human |
 | C9 | Mono rotation mid-session | headless | E |
 | C10 | immersive-vr: opaque, camera off, mono/stereo (phases vrMono/vrStereo, `ViewerPhase.blendsCamera`) | device (exit-button enters vrMono, 60 fps, black) | R iw-exit-button.entered-ar |
+| C11 | Polyfill base: IWER 2.7.0 built from PR #208 (`polyfill/vendor/iwer-2.7.0-pr208.tgz`, `scripts/build-iwer.sh`, `scripts/iwer-patch.sh`) + `patches/iwer+2.7.0.patch`; WebGPU sessions get [0, 1] projection depth; HoloKit head-gaze input kept | device (2026-11-01, regression pages/toggle/immersive-web) | U (120), E (41/41), R |
 
 ## D. WebXR AR Module conformance ([spec](https://immersive-web.github.io/webxr-ar-module/))
 
@@ -115,6 +116,11 @@ Image tracking:
 | F15 | `examples/image-tracking.html` + HoloWeb marker (0.15 m, to publish on holoweb.app) | device pass (scores trackable, ARKit n=1, tracked=true, width 0.150 m at 0.34 m) |
 | F16 | [PlayCanvas image tracking](https://playcanv.as/p/PCsSvN5h/) | device: enters AR (iframe, js click), setTrackedImages trackable, ARKit n=1; tracking its own image needs that image on screen (human/fixture) |
 | F17 | [Needle image tracking](https://engine.needle.tools/samples/image-tracking/) | device (app URL image-tracking-zubckszr0qj2.needle.run): enters AR, 2 images trackable, ARKit n=2; tracking needs the Needle marker on screen. The gallery wrapper embeds it cross-origin (refused by design) |
+
+Gaussian splats:
+| ID | Page | Status |
+|---|---|---|
+| F18 | https://holoweb.app/examples/spark-splat.html (website repo `public/examples/`, gallery 16, `/c/16`; not bundled in the app): Spark 2.2.0 (three r180, WebGL2) with the 7 object splats from Spark's examples (45K–206K splats, loaded from sparkjs.dev); `?bench` logs per-object FPS | device pass 2026-09-25: all 7 load and render mono + stereo; 60 fps up to ~180K splats; cat/dessert (~205K) drop to 43–57 fps; see notes.md "Spark splat benchmark". HoloKit optical look: human |
 
 Gallery (https://holoweb.app/, 15 entries; each to be opened on device):
 | ID | Entry | Status |
