@@ -361,14 +361,12 @@ final class HoloWebState: NSObject {
 }
 
 extension HoloWebState: WKScriptMessageHandler {
-    nonisolated func userContentController(_ userContentController: WKUserContentController,
-                                           didReceive message: WKScriptMessage) {
+    func userContentController(_ userContentController: WKUserContentController,
+                               didReceive message: WKScriptMessage) {
         guard message.name == Self.logHandlerName, let text = message.body as? String else { return }
-        nonisolated(unsafe) let frame = message.frameInfo
-        MainActor.assumeIsolated {
-            guard frame.isMainFrame || bridge?.accepts(frame) == true else { return }
-            print("[web] \(text)")
-        }
+        let frame = message.frameInfo
+        guard frame.isMainFrame || bridge?.accepts(frame) == true else { return }
+        print("[web] \(text)")
     }
 }
 

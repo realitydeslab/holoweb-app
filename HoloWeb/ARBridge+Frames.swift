@@ -19,7 +19,6 @@ extension ARBridge {
 
 extension ARBridge: ARSessionDelegate {
     nonisolated func session(_ session: ARSession, didUpdate frame: ARFrame) {
-        nonisolated(unsafe) let frame = frame
         MainActor.assumeIsolated {
             self.stampPlaneUpdates(frame)
             #if DEBUG
@@ -30,17 +29,14 @@ extension ARBridge: ARSessionDelegate {
     }
 
     nonisolated func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
-        nonisolated(unsafe) let anchors = anchors
         MainActor.assumeIsolated { self.markAnchorsChanged(anchors, removed: false) }
     }
 
     nonisolated func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
-        nonisolated(unsafe) let anchors = anchors
         MainActor.assumeIsolated { self.markAnchorsChanged(anchors, removed: false) }
     }
 
     nonisolated func session(_ session: ARSession, didRemove anchors: [ARAnchor]) {
-        nonisolated(unsafe) let anchors = anchors
         MainActor.assumeIsolated { self.markAnchorsChanged(anchors, removed: true) }
     }
 
@@ -112,8 +108,8 @@ extension ARBridge: ARSessionDelegate {
         let size = webView.bounds.size
         guard size.width > 0, size.height > 0 else { return }
         let camera = frame.camera
-        let view = camera.viewMatrix(for: orientation)
-        let proj = camera.projectionMatrix(for: orientation, viewportSize: size, zNear: 0.01, zFar: 1000)
+        let view = camera.viewMatrix(viewRotationAngle: orientation.viewRotationAngle)
+        let proj = camera.projectionMatrix(viewRotationAngle: orientation.viewRotationAngle, viewportSize: size, zNear: 0.01, zFar: 1000)
         var light: Any = NSNull()
         if let estimate = frame.lightEstimate {
             light = ["ambientIntensity": Double(estimate.ambientIntensity),

@@ -39,6 +39,19 @@ extension ARCamera.TrackingState {
 }
 
 extension UIInterfaceOrientation {
+    /// ARKit's view rotation angle (iOS 27) for this interface orientation: the clockwise rotation, in
+    /// degrees, that keeps the camera image level (0 landscapeRight, 90 portrait, 180 landscapeLeft,
+    /// 270 portraitUpsideDown). Derived from the interface, not `ARSession.viewRotationAngle`, because
+    /// rendering must match the web view's (possibly locked) orientation rather than the device's.
+    var viewRotationAngle: CGFloat {
+        switch self {
+        case .landscapeRight: 0
+        case .landscapeLeft: 180
+        case .portraitUpsideDown: 270
+        default: 90
+        }
+    }
+
     var bridgeName: String {
         switch self {
         case .portraitUpsideDown: "portraitUpsideDown"
@@ -63,13 +76,19 @@ struct DeviceInfo {
         "iPhone18,1": 460, "iPhone18,2": 460,
     ]
 
-    @MainActor static var current: DeviceInfo {
+    /// The phone model and the screen that shows `view` (the web view), falling back to the first
+    /// connected window scene's screen before the view is in a window.
+    @MainActor static func current(for view: UIView) -> DeviceInfo {
         var system = utsname()
         uname(&system)
         let model = withUnsafeBytes(of: &system.machine) { raw in
             String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
         }
-        let screen = UIScreen.main
+        let screen = view.window?.windowScene?.screen
+            ?? UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.screen }.first
+        guard let screen else {
+            return DeviceInfo(model: model, screenWidthPx: 0, screenHeightPx: 0, scale: 1, dpi: dpiTable[model] ?? 460)
+        }
         return DeviceInfo(model: model,
                           screenWidthPx: Double(screen.nativeBounds.width),
                           screenHeightPx: Double(screen.nativeBounds.height),

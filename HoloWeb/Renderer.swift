@@ -141,9 +141,10 @@ class Renderer {
             //   returns its backing to the cache, which crashed (EXC_BAD_ACCESS in
             //   CVMetalTextureCache::bufferBackingNotInUse) when the Renderer and its cache were freed
             //   on AR exit before the GPU finished the last frame.
-            var textures = [capturedImageTextureY, capturedImageTextureCbCr]
+            // nonisolated(unsafe): only the completion handler touches these after this point.
+            nonisolated(unsafe) var textures = [capturedImageTextureY, capturedImageTextureCbCr]
             let semaphore = inFlightSemaphore
-            let textureCache = capturedImageTextureCache
+            nonisolated(unsafe) let textureCache = capturedImageTextureCache
             commandBuffer.addCompletedHandler { _ in
                 semaphore.signal()
                 textures.removeAll()
@@ -385,8 +386,8 @@ class Renderer {
         
         let uniforms = sharedUniformBufferAddress.assumingMemoryBound(to: SharedUniforms.self)
         
-        uniforms.pointee.viewMatrix = frame.camera.viewMatrix(for: orientation)
-        uniforms.pointee.projectionMatrix = frame.camera.projectionMatrix(for: orientation, viewportSize: viewportSize, zNear: 0.001, zFar: 1000)
+        uniforms.pointee.viewMatrix = frame.camera.viewMatrix(viewRotationAngle: orientation.viewRotationAngle)
+        uniforms.pointee.projectionMatrix = frame.camera.projectionMatrix(viewRotationAngle: orientation.viewRotationAngle, viewportSize: viewportSize, zNear: 0.001, zFar: 1000)
 
         // Set up lighting for the scene using the ambient intensity if provided
         var ambientIntensity: Float = 1.0
@@ -459,7 +460,7 @@ class Renderer {
     
     func updateImagePlane(frame: ARFrame) {
         // Update the texture coordinates of our image plane to aspect fill the viewport
-        let displayToCameraTransform = frame.displayTransform(for: orientation, viewportSize: viewportSize).inverted()
+        let displayToCameraTransform = frame.displayTransform(viewRotationAngle: orientation.viewRotationAngle, viewportSize: viewportSize).inverted()
 
         let vertexData = imagePlaneVertexBuffer.contents().assumingMemoryBound(to: Float.self)
         for index in 0...3 {

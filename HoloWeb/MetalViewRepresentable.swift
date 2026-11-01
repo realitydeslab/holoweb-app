@@ -9,7 +9,7 @@ struct MetalViewRepresentable: UIViewRepresentable {
     @Environment(HoloWebState.self) private var state
     
      func makeUIView(context: Context) -> MTKView {
-         let mtkView = MTKView(frame: UIScreen.main.bounds, device: MTLCreateSystemDefaultDevice())
+         let mtkView = MTKView(frame: .zero, device: MTLCreateSystemDefaultDevice())  // SwiftUI sizes it; drawableSizeWillChange resizes the renderer
          mtkView.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
          mtkView.backgroundColor = .clear
          mtkView.isPaused = false

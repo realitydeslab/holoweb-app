@@ -19,7 +19,7 @@ struct BridgeOrigin: Equatable, CustomStringConvertible {
         self.port = port == defaultPort ? 0 : port
     }
 
-    init(_ origin: WKSecurityOrigin) {
+    @MainActor init(_ origin: WKSecurityOrigin) {
         self.init(scheme: origin.protocol, host: origin.host, port: origin.port)
     }
 

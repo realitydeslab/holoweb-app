@@ -167,7 +167,7 @@ extension ARBridge: WKScriptMessageHandlerWithReply {
             if activeFrameKey == nil || frames[activeFrameKey!] == nil { activeFrameKey = key }
             pageReady = true
             print("[bridge] ready \(key)\(message.frameInfo.isMainFrame ? "" : " (iframe)"), transport: \(handle != nil ? "WKJSHandle" : "window.__holoweb")")
-            replyHandler(["ok": true, "device": DeviceInfo.current.dictionary,
+            replyHandler(["ok": true, "device": DeviceInfo.current(for: webView).dictionary,
                           "mode": state?.mode.rawValue ?? "mono",
                           "capabilities": Self.capabilities,
                           "transport": handle != nil ? "jshandle" : "global"], nil)
